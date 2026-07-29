@@ -1,0 +1,25 @@
+[package]
+name = "vault"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Automatic document versioning — init once, retrieve any version later"
+license = "MIT"
+repository = "https://github.com/vadim-schultz/vault"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
