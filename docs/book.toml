@@ -1,11 +1,14 @@
 [book]
 title = "Vault"
 authors = ["Vadim Schultz"]
-description = "Automatic document versioning"
+description = "Automatic version history"
 src = "src"
+language = "en"
 
 [build]
 build-dir = "book"
 
 [output.html]
+site-url = "/vault/"
 git-repository-url = "https://github.com/vadim-schultz/vault"
+edit-url-template = "https://github.com/vadim-schultz/vault/edit/main/docs/{path}"

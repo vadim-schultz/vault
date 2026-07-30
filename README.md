@@ -1,8 +1,9 @@
 # Vault
 
-**Document version history — not secrets management.**
+**Automatic version history.**
 
 [![CI](https://github.com/vadim-schultz/vault/actions/workflows/ci.yml/badge.svg)](https://github.com/vadim-schultz/vault/actions/workflows/ci.yml)
+[![docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://vadim-schultz.github.io/vault/)
 [![License](https://img.shields.io/github/license/vadim-schultz/vault)](LICENSE)
 
 Run `vault init` once in a docs directory, then forget about it. Weeks later, retrieve any earlier version:
@@ -13,6 +14,10 @@ vault restore design.md --at "2026-06-01 23:58"
 ```
 
 No git knowledge required. Vault watches files in the background and records every change.
+
+## Documentation
+
+User guide: [https://vadim-schultz.github.io/vault/](https://vadim-schultz.github.io/vault/)
 
 ## Build
 

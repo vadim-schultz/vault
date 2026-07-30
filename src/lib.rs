@@ -1,4 +1,4 @@
-//! Automatic document versioning — init once, retrieve any version later.
+//! Automatic version history — init once, retrieve any version later.
 
 pub mod cli;
 
