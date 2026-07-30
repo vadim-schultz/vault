@@ -1,7 +1,7 @@
 # CLI reference
 
-Command-line interface for the `vault` binary. Subcommands are **stubs** until the chapters noted
-below implement them.
+Command-line interface for the `vault` binary. `init` is implemented; other subcommands are
+**stubs** until the chapters noted below implement them.
 
 ## Global options
 
@@ -15,7 +15,7 @@ below implement them.
 
 | Command | Status | Chapter |
 |---------|--------|---------|
-| `init` | Stub | 3 |
+| `init` | Implemented | 3 |
 | `show PATH --at DATE` | Stub | 5 |
 | `restore PATH --at DATE [--dry-run]` | Stub | 5 |
 | `log [PATH]` | Stub | 5 |
@@ -26,12 +26,20 @@ below implement them.
 
 ### `vault init`
 
-Initialize a vault in the current directory. Creates `.vault/`, starts the background watcher
-(Chapter 3–4).
+Initialize a vault in the current directory. Creates `.vault/` with `config.toml`, a recovery
+`README`, a bare git object store (`.vault/.git/`), and the `meta.db` SQLite index.
+
+Background watching starts in Chapter 4.
 
 ```bash
 vault init
 ```
+
+Running `vault init` again in the same directory fails with an "already initialized" error.
+
+| Flag | Description |
+|------|-------------|
+| `--vault-path PATH` | Path to the `.vault/` directory (default: `./.vault` under the current directory) |
 
 ### `vault show`
 

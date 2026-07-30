@@ -20,14 +20,24 @@ cargo build --release
 
 Expected output: `vault 0.1.0`.
 
+## Initialize a vault
+
+In a directory containing documents you want to version:
+
+```bash
+./target/release/vault init
+```
+
+This creates `.vault/` with storage artifacts. A second `vault init` in the same directory fails.
+
 ## Verify the CLI
 
 ```bash
 ./target/release/vault --help
 ```
 
-Subcommands (`init`, `show`, `restore`, `log`, `diff`, `status`, `list`, `ignore`) are visible
-in `--help` but return **not implemented yet** until Chapter 3–5 land.
+Subcommands (`show`, `restore`, `log`, `diff`, `status`, `list`, `ignore`) are visible in
+`--help` but return **not implemented yet** until Chapters 4–5 land. `vault init` is implemented.
 
 ## Local documentation
 

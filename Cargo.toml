@@ -11,11 +11,18 @@ readme = "README.md"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+gix = "0.73.0"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.19"
 tokio = { version = "1", features = ["full"] }
+toml = "0.9.6"
 
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+tempfile = "3.27.0"
 
 [lints.rust]
 unsafe_code = "forbid"
