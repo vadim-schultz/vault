@@ -3,7 +3,7 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
-/// Document version history — not secrets management.
+/// Automatic version history.
 #[derive(Debug, Parser)]
 #[command(name = "vault", version, about)]
 pub struct Cli {
