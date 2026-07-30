@@ -3,6 +3,9 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
+use crate::init;
+use crate::paths;
+
 /// Automatic version history.
 #[derive(Debug, Parser)]
 #[command(name = "vault", version, about)]
@@ -75,19 +78,30 @@ pub enum Command {
 /// # Errors
 ///
 /// Returns an error when a subcommand fails or is not yet implemented.
-#[allow(clippy::unused_async)] // Subcommands gain real async I/O in Chapter 3+.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
-    dispatch(cli)
+    dispatch(cli).await
 }
 
-fn dispatch(cli: Cli) -> Result<()> {
+async fn dispatch(cli: Cli) -> Result<()> {
     let Some(command) = cli.command else {
         return Ok(());
     };
 
     match command {
-        Command::Init => stub("init"),
+        Command::Init => {
+            let paths = paths::resolve_init(cli.vault_path)?;
+            let verbose = cli.verbose;
+            let vault_display = paths.vault_dir.display().to_string();
+            tokio::task::spawn_blocking(move || init::run(&paths))
+                .await?
+                .map_err(|e| anyhow::anyhow!(e))?;
+            println!("Vault initialized at {vault_display}");
+            if verbose {
+                eprintln!("initialized vault at {vault_display}");
+            }
+            Ok(())
+        }
         Command::Show { .. } => stub("show"),
         Command::Restore { .. } => stub("restore"),
         Command::Log { .. } => stub("log"),
