@@ -118,8 +118,17 @@ vaults are picked up without restart. Writes are atomic: acquire `registry.lock`
 
 ## Internal implementation (not user-facing)
 
-All git operations live in `src/storage/git.rs` using **gix**. Vault never shells out to the
-`git` binary. On each snapshot:
+The crate follows a **ports-and-adapters** layout:
+
+| Layer | Role |
+|-------|------|
+| `domain/` | Pure types (`RelPath`, `VaultLayout`, `FileChange`) — no I/O |
+| `ports/` | Trait boundaries (`ObjectStore`, `MetaIndex`, `RegistryStore`, `ServiceManager`, `Clock`) |
+| `adapters/` | Production and test implementations (gix, SQLite, TOML registry, systemd) |
+| `app/` | Use-cases (`init`, `snapshot`, `status`, `prune`, `add_ignore`) |
+| `cli/`, `daemon/`, `watcher/` | Presentation and long-running runtime |
+
+Git commits are written by the `GixObjectStore` adapter (`src/adapters/gix.rs`), backed by `src/storage/git.rs` helpers using **gix**. Vault never shells out to the `git` binary. On each snapshot:
 
 - A gix commit records changed blobs with messages like `vault: update docs/arch.md @ 2026-07-29T14:32:01Z`
 - A row is inserted into SQLite linking paths, commit SHA, and timestamps
