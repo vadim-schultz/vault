@@ -1,6 +1,7 @@
 //! Concrete adapter implementations.
 
 pub mod detached_spawn;
+pub mod fs_probe;
 pub mod gix;
 pub mod noop_service;
 pub mod sqlite;
@@ -12,6 +13,7 @@ pub mod toml_registry;
 pub mod fakes;
 
 pub use detached_spawn::DetachedSpawnService;
+pub use fs_probe::probe_path;
 pub use gix::GixObjectStore;
 pub use noop_service::NoopService;
 pub use sqlite::SqliteMetaIndex;

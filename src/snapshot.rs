@@ -2,12 +2,11 @@
 
 use std::path::Path;
 
+use crate::adapters::probe_path;
 use crate::config::VaultConfig;
-use crate::domain::{
-    CommitSha, FileChange, FileEventKind, RelPath, SnapshotRecord, SnapshotResult, VaultLayout,
-};
+use crate::domain::{CommitSha, FileChange, RelPath, SnapshotRecord, SnapshotResult, VaultLayout};
 use crate::error::VaultError;
-use crate::ignore::{exceeds_max_bytes, IgnoreMatcher};
+use crate::ignore::IgnoreMatcher;
 use crate::storage::{git, sqlite};
 use crate::walk::collect_baseline_changes;
 
@@ -60,35 +59,31 @@ pub fn commit_changes(
 
 /// Classify notified relative paths into snapshot changes.
 ///
+/// `ignore` is the matcher already compiled for the vault, so a debounce batch does
+/// not rebuild the glob set.
+///
 /// # Errors
 ///
-/// Returns [`VaultError`] when ignore matching fails.
+/// Returns [`VaultError`] when a path exists but cannot be inspected.
 pub fn changes_from_rel_paths(
     worktree: &Path,
     rel_paths: &[RelPath],
-    config: &VaultConfig,
+    ignore: &IgnoreMatcher,
+    max_file_bytes: u64,
 ) -> Result<Vec<FileChange>, VaultError> {
-    let matcher = IgnoreMatcher::from_config(config)?;
     let mut changes = Vec::new();
     for rel in rel_paths {
-        if matcher.is_ignored(rel) {
+        if ignore.is_ignored(rel) {
             continue;
         }
-        let abs = worktree.join(rel.to_path());
-        if abs.is_file() {
-            if exceeds_max_bytes(&abs, config.watcher.max_file_bytes)? {
-                continue;
-            }
-            changes.push(FileChange {
-                rel: rel.clone(),
-                kind: FileEventKind::Modify,
-            });
-        } else {
-            changes.push(FileChange {
-                rel: rel.clone(),
-                kind: FileEventKind::Delete,
-            });
-        }
+        let found = probe_path(&worktree.join(rel.to_path()))?;
+        let Some(kind) = found.classify(max_file_bytes) else {
+            continue;
+        };
+        changes.push(FileChange {
+            rel: rel.clone(),
+            kind,
+        });
     }
     Ok(changes)
 }
@@ -104,6 +99,7 @@ fn snapshot_message(changes: &[FileChange], created_at: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::FileEventKind;
     use std::fs;
     use tempfile::TempDir;
 
@@ -160,23 +156,52 @@ mod tests {
         );
     }
 
+    fn matcher(config: &VaultConfig) -> IgnoreMatcher {
+        IgnoreMatcher::from_config(config).expect("matcher")
+    }
+
     #[test]
     fn changes_from_rel_paths_classifies_modify_and_delete() {
         let dir = TempDir::new().expect("tempdir");
         let file = dir.path().join("keep.md");
         fs::write(&file, b"x").expect("write");
         let config = VaultConfig::defaults();
+        let ignore = matcher(&config);
+        let max = config.watcher.max_file_bytes;
 
-        let changes = changes_from_rel_paths(dir.path(), &[RelPath::parse("keep.md")], &config)
-            .expect("modify");
+        let changes =
+            changes_from_rel_paths(dir.path(), &[RelPath::parse("keep.md")], &ignore, max)
+                .expect("modify");
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].kind, FileEventKind::Modify);
 
         fs::remove_file(file).expect("remove");
-        let changes = changes_from_rel_paths(dir.path(), &[RelPath::parse("keep.md")], &config)
-            .expect("delete");
+        let changes =
+            changes_from_rel_paths(dir.path(), &[RelPath::parse("keep.md")], &ignore, max)
+                .expect("delete");
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].kind, FileEventKind::Delete);
+    }
+
+    #[test]
+    fn directory_event_does_not_become_a_delete() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir_all(dir.path().join("research")).expect("mkdir");
+        fs::write(dir.path().join("research").join("sources.md"), b"x").expect("write");
+        let config = VaultConfig::defaults();
+
+        let changes = changes_from_rel_paths(
+            dir.path(),
+            &[RelPath::parse("research")],
+            &matcher(&config),
+            config.watcher.max_file_bytes,
+        )
+        .expect("changes");
+
+        assert!(
+            changes.is_empty(),
+            "a directory event must not produce a change, got {changes:?}"
+        );
     }
 
     #[test]
@@ -190,7 +215,8 @@ mod tests {
         let changes = changes_from_rel_paths(
             dir.path(),
             &[RelPath::parse("notes.md.swp"), RelPath::parse("big.bin")],
-            &config,
+            &matcher(&config),
+            config.watcher.max_file_bytes,
         )
         .expect("changes");
         assert!(changes.is_empty());
