@@ -1,13 +1,12 @@
-//! systemd user unit for the singleton vault daemon.
+//! systemd user unit adapter.
 
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::daemon;
 use crate::error::VaultError;
+use crate::ports::{ServiceManager, ServiceState};
 use crate::service::constants::{SYSTEMD_UNIT_FILE, SYSTEMD_USER_UNIT_REL_PATH};
-use crate::service::{ServiceManager, ServiceState};
 
 /// systemd user service manager.
 pub struct SystemdService;
@@ -38,10 +37,18 @@ impl SystemdService {
             exe.display()
         )
     }
-}
 
-impl ServiceManager for SystemdService {
-    fn install(&self) -> Result<(), VaultError> {
+    /// Return whether systemd user services are available.
+    #[must_use]
+    pub fn is_available() -> bool {
+        if Command::new("systemctl").arg("--version").output().is_err() {
+            return false;
+        }
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .is_some_and(|dir| std::path::Path::new(&dir).join("systemd/private").exists())
+    }
+
+    fn install_unit() -> Result<(), VaultError> {
         let path = Self::unit_path();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
@@ -52,12 +59,11 @@ impl ServiceManager for SystemdService {
         run_systemctl(&["--user", "enable", SYSTEMD_UNIT_FILE])?;
         Ok(())
     }
+}
 
-    fn ensure_running(&self) -> Result<(), VaultError> {
-        if daemon::is_running() {
-            return Ok(());
-        }
-        self.install()?;
+impl ServiceManager for SystemdService {
+    fn start(&self) -> Result<(), VaultError> {
+        Self::install_unit()?;
         run_systemctl(&["--user", "start", SYSTEMD_UNIT_FILE])
     }
 
@@ -79,39 +85,19 @@ impl ServiceManager for SystemdService {
     }
 }
 
-impl SystemdService {
-    /// Return whether systemd user services are available.
-    #[must_use]
-    pub fn is_available() -> bool {
-        if Command::new("systemctl").arg("--version").output().is_err() {
-            return false;
-        }
-        std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|dir| {
-            let private = std::path::Path::new(&dir).join("systemd/private");
-            private.exists()
-        })
-    }
-}
-
 fn run_systemctl(args: &[&str]) -> Result<(), VaultError> {
     let output = Command::new("systemctl")
         .args(args)
         .output()
-        .map_err(|e| VaultError::Service(format!("failed to run systemctl: {e}")))?;
+        .map_err(VaultError::service)?;
     if output.status.success() {
         return Ok(());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(VaultError::Service(format!(
+    Err(VaultError::service(std::io::Error::other(format!(
         "systemctl {} failed: {stderr}",
         args.join(" ")
-    )))
-}
-
-/// Return whether systemd user services are available.
-#[must_use]
-pub fn is_available() -> bool {
-    SystemdService::is_available()
+    ))))
 }
 
 #[cfg(test)]

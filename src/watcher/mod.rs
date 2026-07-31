@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use notify::RecursiveMode;
 use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, NoCache};
@@ -15,9 +15,13 @@ use tokio::sync::{mpsc, watch};
 
 pub use router::Router;
 
+use crate::daemon;
 use crate::error::VaultError;
-use crate::paths::{ensure_state_dir, registry_path};
+use crate::paths::{ensure_state_dir, registry_path, REGISTRY_FILE};
 use crate::registry::VaultRegistry;
+
+/// Slow safety-net poll when notify misses a registry change.
+const REGISTRY_POLL_MS: u64 = 5000;
 
 /// Run the watcher until `shutdown` becomes true.
 ///
@@ -31,10 +35,13 @@ use crate::registry::VaultRegistry;
 pub async fn run(shutdown: watch::Receiver<bool>) -> Result<(), VaultError> {
     let state = Arc::new(Mutex::new(WatcherState::new()?));
     let (reload_tx, reload_rx) = mpsc::unbounded_channel();
-    let mut debouncer = build_debouncer(Arc::clone(&state), reload_tx)?;
+    let mut debouncer = build_debouncer(Arc::clone(&state), reload_tx.clone())?;
 
     apply_watches(&state, &mut debouncer)?;
-    seed_registry_mtime();
+    {
+        let mut guard = state.lock().expect("lock");
+        guard.registry_mtime = registry_mtime();
+    }
 
     run_event_loop(shutdown, &state, &mut debouncer, reload_rx).await
 }
@@ -52,7 +59,7 @@ fn build_debouncer(
             on_debounced_events(result, Arc::clone(&state), reload_tx.clone(), &handle);
         },
     )
-    .map_err(|e| VaultError::Notify(e.to_string()))
+    .map_err(VaultError::notify)
 }
 
 fn min_debounce_ms(state: &Arc<Mutex<WatcherState>>) -> u64 {
@@ -67,6 +74,11 @@ fn on_debounced_events(
     handle: &tokio::runtime::Handle,
 ) {
     let Ok(events) = result else {
+        if let Err(errors) = result {
+            let _ = append_notify_error(&VaultError::notify(std::io::Error::other(format!(
+                "{errors:?}"
+            ))));
+        }
         return;
     };
     let abs_paths = external_paths_from_events(&events);
@@ -88,10 +100,6 @@ fn external_paths_from_events(events: &[notify_debouncer_full::DebouncedEvent]) 
         .collect()
 }
 
-fn seed_registry_mtime() {
-    REGISTRY_MTIME.with(|cell| cell.set(registry_mtime()));
-}
-
 async fn run_event_loop(
     mut shutdown: watch::Receiver<bool>,
     state: &Arc<Mutex<WatcherState>>,
@@ -99,17 +107,18 @@ async fn run_event_loop(
     mut reload_rx: mpsc::UnboundedReceiver<()>,
 ) -> Result<(), VaultError> {
     loop {
-        if shutdown_requested(&shutdown) {
+        if *shutdown.borrow() {
             break;
         }
 
         tokio::select! {
             changed = shutdown.changed() => {
-                if shutdown_signal_received(&changed, &shutdown) {
+                if changed.is_ok() && *shutdown.borrow() {
                     break;
                 }
             }
             Some(()) = reload_rx.recv() => {
+                let _ = daemon::prune_registry();
                 apply_watches(state, debouncer)?;
             }
             () = debouncer_tick() => {
@@ -121,22 +130,23 @@ async fn run_event_loop(
     Ok(())
 }
 
-fn shutdown_requested(shutdown: &watch::Receiver<bool>) -> bool {
-    *shutdown.borrow()
-}
-
-fn shutdown_signal_received(
-    changed: &Result<(), watch::error::RecvError>,
-    shutdown: &watch::Receiver<bool>,
-) -> bool {
-    changed.is_ok() && shutdown_requested(shutdown)
-}
-
 fn refresh_watches_if_registry_changed(
     state: &Arc<Mutex<WatcherState>>,
     debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
 ) -> Result<(), VaultError> {
-    if registry_changed() {
+    let current = registry_mtime();
+    let changed = {
+        let mut guard = state.lock().expect("lock");
+        let previous = guard.registry_mtime;
+        if previous == current {
+            false
+        } else {
+            guard.registry_mtime = current;
+            true
+        }
+    };
+    if changed {
+        let _ = daemon::prune_registry();
         apply_watches(state, debouncer)?;
     }
     Ok(())
@@ -148,20 +158,28 @@ async fn process_paths(
     reload_tx: mpsc::UnboundedSender<()>,
 ) -> Result<(), VaultError> {
     if abs_paths.iter().any(|p| is_registry_related(p)) {
-        REGISTRY_MTIME.with(|cell| cell.set(None));
+        let mut guard = state.lock().expect("lock");
+        guard.registry_mtime = None;
+        drop(guard);
         let _ = reload_tx.send(());
     }
     let batches = {
-        let mut guard = state.lock().expect("lock");
-        guard.queue_events(abs_paths);
-        guard.take_pending_batches()
+        let guard = state.lock().expect("lock");
+        guard.router.route(abs_paths)
     };
     for (vault, paths) in batches {
         tokio::task::spawn_blocking(move || worker::commit_batch(&vault, &paths))
             .await
-            .map_err(|err| VaultError::Notify(err.to_string()))??;
+            .map_err(|_| VaultError::TaskPanicked)??;
     }
-    if registry_changed() {
+    let changed = {
+        let current = registry_mtime();
+        let mut guard = state.lock().expect("lock");
+        let previous = guard.registry_mtime;
+        guard.registry_mtime = current;
+        previous != current
+    };
+    if changed {
         let _ = reload_tx.send(());
     }
     Ok(())
@@ -182,15 +200,14 @@ fn append_notify_error(err: &VaultError) -> Result<(), VaultError> {
 }
 
 async fn debouncer_tick() {
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(REGISTRY_POLL_MS)).await;
 }
 
 struct WatcherState {
     router: Router,
     watched_roots: HashSet<PathBuf>,
-    registry_mtime: Option<std::time::SystemTime>,
+    registry_mtime: Option<SystemTime>,
     state_watches_registered: bool,
-    pending: Vec<(crate::watcher::router::WatchedVault, Vec<PathBuf>)>,
 }
 
 impl WatcherState {
@@ -202,57 +219,39 @@ impl WatcherState {
             watched_roots: HashSet::new(),
             registry_mtime: registry_mtime(),
             state_watches_registered: false,
-            pending: Vec::new(),
         })
     }
 
     fn refresh_router(&mut self) -> Result<(), VaultError> {
         let registry = VaultRegistry::load()?;
         self.router = Router::from_registry(&registry)?;
-        self.registry_mtime = registry_mtime();
         Ok(())
     }
 
-    fn new_roots(&mut self) -> Vec<PathBuf> {
-        self.router
-            .roots()
-            .into_iter()
-            .filter(|root| self.watched_roots.insert(root.clone()))
-            .collect()
-    }
-
-    fn take_pending_batches(
-        &mut self,
-    ) -> Vec<(crate::watcher::router::WatchedVault, Vec<PathBuf>)> {
-        std::mem::take(&mut self.pending)
-    }
-
-    fn queue_events(&mut self, abs_paths: Vec<PathBuf>) {
-        let rel_events: Vec<(PathBuf, PathBuf)> = abs_paths
-            .into_iter()
-            .filter_map(|abs| {
-                let vault = self.router.vault_for(&abs)?;
-                let rel = abs.strip_prefix(&vault.root).ok()?.to_path_buf();
-                Some((abs, rel))
-            })
+    fn roots_to_watch(&mut self) -> (Vec<PathBuf>, Vec<PathBuf>, bool) {
+        let current: HashSet<_> = self.router.roots().into_iter().collect();
+        let new_roots: Vec<_> = current
+            .iter()
+            .filter(|root| !self.watched_roots.contains(*root))
+            .cloned()
             .collect();
-        let grouped = self.router.group_paths(&rel_events);
-        for (root, paths) in grouped {
-            let Some(vault) = self.router.vault_by_root(&root) else {
-                continue;
-            };
-            self.pending.push((vault.clone(), paths));
+        let removed: Vec<_> = self
+            .watched_roots
+            .iter()
+            .filter(|root| !current.contains(*root))
+            .cloned()
+            .collect();
+        for root in &new_roots {
+            self.watched_roots.insert(root.clone());
         }
-    }
-
-    fn plan_watch_refresh(&mut self) -> Result<(Vec<PathBuf>, bool), VaultError> {
-        self.refresh_router()?;
-        let new_roots = self.new_roots();
-        let register_state_watches = !self.state_watches_registered;
-        if register_state_watches {
+        for root in &removed {
+            self.watched_roots.remove(root);
+        }
+        let register_state = !self.state_watches_registered;
+        if register_state {
             self.state_watches_registered = true;
         }
-        Ok((new_roots, register_state_watches))
+        (new_roots, removed, register_state)
     }
 }
 
@@ -260,13 +259,18 @@ fn apply_watches(
     state: &Arc<Mutex<WatcherState>>,
     debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
 ) -> Result<(), VaultError> {
-    let (new_roots, register_state_watches) = {
+    let (new_roots, removed, register_state) = {
         let mut guard = state.lock().expect("lock");
-        guard.plan_watch_refresh()?
+        guard.refresh_router()?;
+        guard.registry_mtime = registry_mtime();
+        guard.roots_to_watch()
     };
 
-    if register_state_watches {
+    if register_state {
         register_global_state_watches(debouncer)?;
+    }
+    for root in removed {
+        let _ = debouncer.unwatch(&root);
     }
     watch_vault_roots(debouncer, new_roots)
 }
@@ -298,30 +302,10 @@ fn watch_path(
     path: &std::path::Path,
     mode: RecursiveMode,
 ) -> Result<(), VaultError> {
-    debouncer
-        .watch(path, mode)
-        .map_err(|e| VaultError::Notify(e.to_string()))
+    debouncer.watch(path, mode).map_err(VaultError::notify)
 }
 
-fn registry_changed() -> bool {
-    let current = registry_mtime();
-    REGISTRY_MTIME.with(|cell| {
-        let previous = cell.get();
-        if previous == current {
-            false
-        } else {
-            cell.set(current);
-            true
-        }
-    })
-}
-
-std::thread_local! {
-    static REGISTRY_MTIME: std::cell::Cell<Option<std::time::SystemTime>> =
-        const { std::cell::Cell::new(None) };
-}
-
-fn registry_mtime() -> Option<std::time::SystemTime> {
+fn registry_mtime() -> Option<SystemTime> {
     registry_path()
         .ok()
         .and_then(|p| p.metadata().ok())
@@ -342,13 +326,8 @@ fn is_registry_related(path: &std::path::Path) -> bool {
     }
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.contains("registry"))
+        .is_some_and(|name| name == REGISTRY_FILE || name == crate::paths::REGISTRY_LOCK)
         && registry
             .parent()
             .is_some_and(|parent| path.starts_with(parent))
-}
-
-#[cfg(test)]
-pub async fn run_until_shutdown(shutdown: watch::Receiver<bool>) -> Result<(), VaultError> {
-    run(shutdown).await
 }

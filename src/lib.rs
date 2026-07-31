@@ -1,12 +1,15 @@
 //! Automatic version history — init once, retrieve any version later.
 
+pub mod adapters;
+pub mod app;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod domain;
 pub mod error;
 pub mod ignore;
-pub mod init;
 pub mod paths;
+pub mod ports;
 pub mod registry;
 pub mod service;
 pub mod snapshot;

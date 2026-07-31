@@ -12,10 +12,11 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::adapters::TomlRegistry;
+use crate::app::prune;
 use crate::error::VaultError;
-use crate::paths::{daemon_heartbeat_path, daemon_lock_path, daemon_log_path, skip_service};
+use crate::paths::{daemon_heartbeat_path, daemon_lock_path, daemon_log_path};
 use crate::registry::VaultRegistry;
-use crate::service;
 use crate::watcher;
 
 /// Daemon heartbeat written to `daemon.json`.
@@ -90,72 +91,28 @@ fn lock_is_held() -> bool {
     FileExt::try_lock(&lock).is_err()
 }
 
-/// Ensure the singleton daemon is installed and running.
-///
-/// # Errors
-///
-/// Returns [`VaultError`] when service start fails.
-pub fn ensure_running() -> Result<(), VaultError> {
-    if skip_service() {
-        return Ok(());
-    }
-    if is_running() {
-        return Ok(());
-    }
-    service::for_current_platform().ensure_running()
-}
-
-/// Background tasks spawned for a running foreground daemon.
-struct DaemonTasks {
-    shutdown_rx: watch::Receiver<bool>,
-    shutdown_task: JoinHandle<()>,
-    heartbeat_task: JoinHandle<()>,
-}
-
-/// Run the daemon in the foreground until interrupted.
+/// Run the daemon in the foreground until interrupted or the watcher exits.
 ///
 /// # Errors
 ///
 /// Returns [`VaultError::DaemonAlreadyRunning`] when another daemon holds the lock.
 pub async fn run_foreground() -> Result<(), VaultError> {
-    let tasks = start_daemon()?;
-    let watcher_result = watcher::run(tasks.shutdown_rx).await;
-    stop_daemon(tasks.shutdown_task, tasks.heartbeat_task).await?;
-    watcher_result
-}
-
-/// Acquire the singleton lock and spawn the heartbeat and shutdown-signal tasks.
-///
-/// # Errors
-///
-/// Returns [`VaultError::DaemonAlreadyRunning`] when another daemon holds the lock.
-fn start_daemon() -> Result<DaemonTasks, VaultError> {
     let guard = Arc::new(DaemonGuard::acquire()?);
     append_log("vault daemon started")?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    Ok(DaemonTasks {
-        shutdown_rx,
-        shutdown_task: spawn_shutdown_listener(shutdown_tx),
-        heartbeat_task: spawn_heartbeat_task(guard),
-    })
-}
+    let shutdown_task = spawn_shutdown_listener(shutdown_tx);
+    let heartbeat_task = spawn_heartbeat_task(Arc::clone(&guard));
 
-/// Wait for the shutdown listener to fire, stop the heartbeat task, and log exit.
-///
-/// # Errors
-///
-/// Returns [`VaultError`] when the shutdown log entry cannot be written.
-async fn stop_daemon(
-    shutdown_task: JoinHandle<()>,
-    heartbeat_task: JoinHandle<()>,
-) -> Result<(), VaultError> {
-    let _ = shutdown_task.await;
+    let watcher_result = watcher::run(shutdown_rx).await;
+
+    shutdown_task.abort();
     heartbeat_task.abort();
-    append_log("vault daemon stopped")
+    drop(guard);
+    append_log("vault daemon stopped")?;
+    watcher_result
 }
 
-/// Spawn a task that periodically refreshes the daemon heartbeat.
 fn spawn_heartbeat_task(guard: Arc<DaemonGuard>) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
@@ -166,7 +123,6 @@ fn spawn_heartbeat_task(guard: Arc<DaemonGuard>) -> JoinHandle<()> {
     })
 }
 
-/// Spawn a task that signals shutdown once Ctrl-C is received.
 fn spawn_shutdown_listener(shutdown_tx: watch::Sender<bool>) -> JoinHandle<()> {
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
@@ -205,10 +161,7 @@ fn lock_held_error() -> VaultError {
     if let Some(pid) = read_heartbeat().map(|h| h.pid) {
         return VaultError::DaemonAlreadyRunning { pid };
     }
-    VaultError::Io(std::io::Error::new(
-        std::io::ErrorKind::WouldBlock,
-        "daemon lock held",
-    ))
+    VaultError::LockHeld
 }
 
 fn write_heartbeat(started_at: &str, vault_count: usize) -> Result<(), VaultError> {
@@ -226,7 +179,12 @@ fn write_heartbeat(started_at: &str, vault_count: usize) -> Result<(), VaultErro
     Ok(())
 }
 
-fn append_log(message: &str) -> Result<(), VaultError> {
+/// Append a line to `daemon.log`.
+///
+/// # Errors
+///
+/// Returns [`VaultError`] when the log file cannot be written.
+pub fn append_log(message: &str) -> Result<(), VaultError> {
     let path = daemon_log_path()?;
     ensure_parent_dir(&path)?;
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -249,6 +207,15 @@ pub fn spawn_detached() -> Result<(), VaultError> {
         .stderr(std::process::Stdio::null())
         .spawn()?;
     Ok(())
+}
+
+/// Prune stale registry entries (daemon maintenance).
+///
+/// # Errors
+///
+/// Returns [`VaultError`] when registry load or save fails.
+pub fn prune_registry() -> Result<usize, VaultError> {
+    prune::prune(&TomlRegistry)
 }
 
 #[cfg(test)]

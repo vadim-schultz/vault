@@ -5,7 +5,6 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::VaultError;
-use crate::paths::VaultPaths;
 
 /// Watcher settings in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +30,9 @@ impl WatcherConfig {
     const fn default_debounce_ms() -> u64 {
         2000
     }
+
+    /// Default debounce interval in milliseconds.
+    pub const DEFAULT_DEBOUNCE_MS: u64 = 2000;
 
     const fn default_max_file_bytes() -> u64 {
         10 * 1024 * 1024
@@ -99,28 +101,13 @@ impl VaultConfig {
 
     /// Append an ignore pattern when it is not already present.
     ///
-    /// # Errors
-    ///
-    /// Returns [`VaultError`] when the config cannot be written.
-    pub fn add_ignore(&mut self, pattern: &str) -> Result<bool, VaultError> {
+    /// Returns `true` when the pattern was added.
+    #[must_use]
+    pub fn add_ignore(&mut self, pattern: &str) -> bool {
         if self.ignore.iter().any(|p| p == pattern) {
-            return Ok(false);
+            return false;
         }
         self.ignore.push(pattern.to_string());
-        Ok(true)
-    }
-
-    /// Append an ignore pattern to a vault config when it is not already present.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VaultError`] when the config cannot be loaded or written.
-    pub fn add_ignore_pattern(paths: &VaultPaths, pattern: &str) -> Result<(), VaultError> {
-        let config_path = paths.config_path();
-        let mut config = Self::load(&config_path)?;
-        if config.add_ignore(pattern)? {
-            config.write_to(&config_path)?;
-        }
-        Ok(())
+        true
     }
 }

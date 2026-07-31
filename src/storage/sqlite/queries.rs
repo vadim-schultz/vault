@@ -39,3 +39,11 @@ WHERE f.path = ?1
 ORDER BY s.id DESC
 LIMIT 1
 ";
+
+/// Latest commit SHA at or before a timestamp.
+pub const SELECT_COMMIT_AT_OR_BEFORE: &str = "
+SELECT commit_sha FROM snapshots
+WHERE created_at <= ?1
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+";

@@ -8,6 +8,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::sync::watch;
 use vault::config::VaultConfig;
+use vault::domain::RelPath;
 use vault::paths::{META_DB, VAULT_DIR};
 use vault::registry::VaultRegistry;
 
@@ -41,11 +42,11 @@ fn worker_commits_file_change() {
 
     let registry = VaultRegistry::load().expect("registry");
     let router = vault::watcher::Router::from_registry(&registry).expect("router");
-    let vault = router.vault_by_root(dir.path()).expect("vault").clone();
+    let batches = router.route(vec![dir.path().join("a.md")]);
+    let vault = batches[0].0.clone();
 
     fs::write(dir.path().join("a.md"), b"a2").expect("write");
-    vault::watcher::worker::commit_batch(&vault, &[std::path::PathBuf::from("a.md")])
-        .expect("commit");
+    vault::watcher::worker::commit_batch(&vault, &[RelPath::parse("a.md")]).expect("commit");
 
     assert!(snapshot_count(dir.path()) > baseline);
 }

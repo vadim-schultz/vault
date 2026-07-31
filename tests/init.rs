@@ -63,6 +63,22 @@ fn config_has_default_ignores() {
 }
 
 #[test]
+fn partial_vault_reports_stray_files() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    let vault_dir = dir.path().join(VAULT_DIR);
+    fs::create_dir_all(&vault_dir).expect("mkdir");
+    fs::write(vault_dir.join(vault::paths::README_FILE), b"partial").expect("readme");
+
+    common::vault_bin()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("README"));
+}
+
+#[test]
 fn sqlite_schema_matches_spec() {
     let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");

@@ -1,32 +1,29 @@
 //! Per-vault snapshot workers.
 
-use std::path::PathBuf;
-use std::sync::Mutex;
-
+use crate::adapters::{GixObjectStore, SqliteMetaIndex, SystemClock};
+use crate::app::snapshot;
+use crate::domain::RelPath;
 use crate::error::VaultError;
-use crate::paths::VaultPaths;
-use crate::snapshot::{changes_from_paths, commit_changes};
+use crate::snapshot::changes_from_rel_paths;
 use crate::watcher::router::WatchedVault;
-
-static COMMIT_LOCK: Mutex<()> = Mutex::new(());
 
 /// Commit a debounced batch of relative paths for one vault.
 ///
 /// # Errors
 ///
 /// Returns [`VaultError`] when change detection or snapshot fails.
-pub fn commit_batch(vault: &WatchedVault, rel_paths: &[PathBuf]) -> Result<(), VaultError> {
-    let _guard = COMMIT_LOCK
-        .lock()
-        .map_err(|_| VaultError::Notify("commit lock poisoned".to_string()))?;
-    let changes = changes_from_paths(&vault.root, rel_paths, &vault.config)?;
+pub fn commit_batch(vault: &WatchedVault, rel_paths: &[RelPath]) -> Result<(), VaultError> {
+    let changes = changes_from_rel_paths(&vault.root, rel_paths, &vault.config)?;
     if changes.is_empty() {
         return Ok(());
     }
-    let paths = VaultPaths {
-        worktree: vault.root.clone(),
-        vault_dir: vault.paths.vault_dir.clone(),
-    };
-    let _ = commit_changes(&paths, &changes)?;
-    Ok(())
+    let object_store = GixObjectStore::open(&vault.layout)?;
+    let meta_index = SqliteMetaIndex::open(vault.layout.meta_db_path())?;
+    snapshot::commit(
+        &vault.layout,
+        &changes,
+        &SystemClock,
+        &object_store,
+        &meta_index,
+    )
 }

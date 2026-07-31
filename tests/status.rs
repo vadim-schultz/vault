@@ -42,3 +42,29 @@ fn status_shows_baseline_snapshot_time() {
         .success()
         .stdout(predicates::str::contains(&last));
 }
+
+#[test]
+fn status_does_not_write_registry() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("notes.md"), b"v1").expect("write");
+    common::init_in(dir.path());
+
+    let registry = vault::paths::registry_path().expect("registry path");
+    let mtime_before = fs::metadata(&registry)
+        .expect("metadata")
+        .modified()
+        .expect("mtime");
+
+    common::vault_bin()
+        .env(vault::paths::NO_SERVICE_ENV, "1")
+        .arg("status")
+        .assert()
+        .success();
+
+    let mtime_after = fs::metadata(&registry)
+        .expect("metadata")
+        .modified()
+        .expect("mtime");
+    assert_eq!(mtime_before, mtime_after);
+}
