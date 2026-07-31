@@ -1,31 +1,27 @@
 //! Walk vault worktrees to collect baseline file paths.
 
-use std::path::{Path, PathBuf};
-
-use walkdir::{DirEntry, WalkDir};
-
 use crate::config::VaultConfig;
+use crate::domain::{FileChange, FileEventKind, RelPath, VaultLayout};
 use crate::error::VaultError;
 use crate::ignore::{exceeds_max_bytes, IgnoreMatcher};
-use crate::paths::VaultPaths;
-use crate::snapshot::{FileChange, FileEventKind};
+use walkdir::{DirEntry, WalkDir};
 
-/// Collect non-ignored files under `paths` for a baseline snapshot.
+/// Collect non-ignored files under `layout` for a baseline snapshot.
 ///
 /// # Errors
 ///
 /// Returns [`VaultError`] when walking fails or a file exceeds size limits.
 pub fn collect_baseline_changes(
-    paths: &VaultPaths,
+    layout: &VaultLayout,
     config: &VaultConfig,
 ) -> Result<Vec<FileChange>, VaultError> {
     let matcher = IgnoreMatcher::from_config(config)?;
     let mut changes = Vec::new();
     for root in &config.watch_roots {
-        let watch_root = paths.worktree.join(root);
+        let watch_root = layout.worktree.join(root);
         collect_from_watch_root(
             &watch_root,
-            &paths.worktree,
+            &layout.worktree,
             &matcher,
             config.watcher.max_file_bytes,
             &mut changes,
@@ -35,8 +31,8 @@ pub fn collect_baseline_changes(
 }
 
 fn collect_from_watch_root(
-    watch_root: &Path,
-    worktree: &Path,
+    watch_root: &std::path::Path,
+    worktree: &std::path::Path,
     matcher: &IgnoreMatcher,
     max_file_bytes: u64,
     changes: &mut Vec<FileChange>,
@@ -55,7 +51,7 @@ fn collect_from_watch_root(
 
 fn file_change_from_entry(
     entry: &DirEntry,
-    worktree: &Path,
+    worktree: &std::path::Path,
     matcher: &IgnoreMatcher,
     max_file_bytes: u64,
 ) -> Result<Option<FileChange>, VaultError> {
@@ -63,7 +59,7 @@ fn file_change_from_entry(
         return Ok(None);
     }
     let abs = entry.path();
-    let rel = rel_path_in_worktree(worktree, abs)?;
+    let rel = RelPath::from_worktree(worktree, abs)?;
     if matcher.is_ignored(&rel) || exceeds_max_bytes(abs, max_file_bytes)? {
         return Ok(None);
     }
@@ -73,26 +69,14 @@ fn file_change_from_entry(
     }))
 }
 
-fn rel_path_in_worktree(worktree: &Path, abs: &Path) -> Result<PathBuf, VaultError> {
-    abs.strip_prefix(worktree).map(PathBuf::from).map_err(|_| {
-        VaultError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path outside worktree",
-        ))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
 
-    fn vault_paths(dir: &TempDir) -> VaultPaths {
-        VaultPaths {
-            worktree: dir.path().to_path_buf(),
-            vault_dir: dir.path().join(".vault"),
-        }
+    fn layout(dir: &TempDir) -> VaultLayout {
+        VaultLayout::from_worktree(dir.path().to_path_buf())
     }
 
     #[test]
@@ -103,12 +87,11 @@ mod tests {
         fs::write(dir.path().join("sub").join("b.md"), b"b").expect("write b");
         let config = VaultConfig::defaults();
 
-        let changes =
-            collect_baseline_changes(&vault_paths(&dir), &config).expect("collect changes");
+        let changes = collect_baseline_changes(&layout(&dir), &config).expect("collect");
 
-        let rels: Vec<_> = changes.iter().map(|c| c.rel.clone()).collect();
-        assert!(rels.contains(&PathBuf::from("a.md")));
-        assert!(rels.contains(&Path::new("sub").join("b.md")));
+        let rels: Vec<_> = changes.iter().map(|c| c.rel.as_str()).collect();
+        assert!(rels.contains(&"a.md"));
+        assert!(rels.contains(&"sub/b.md"));
         assert!(changes.iter().all(|c| c.kind == FileEventKind::Create));
     }
 
@@ -121,11 +104,10 @@ mod tests {
         fs::write(dir.path().join("keep.md"), b"keep").expect("write keep");
         let config = VaultConfig::defaults();
 
-        let changes =
-            collect_baseline_changes(&vault_paths(&dir), &config).expect("collect changes");
+        let changes = collect_baseline_changes(&layout(&dir), &config).expect("collect");
 
-        let rels: Vec<_> = changes.iter().map(|c| c.rel.clone()).collect();
-        assert_eq!(rels, vec![PathBuf::from("keep.md")]);
+        let rels: Vec<_> = changes.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, vec!["keep.md"]);
     }
 
     #[test]
@@ -136,11 +118,10 @@ mod tests {
         let mut config = VaultConfig::defaults();
         config.watcher.max_file_bytes = 10;
 
-        let changes =
-            collect_baseline_changes(&vault_paths(&dir), &config).expect("collect changes");
+        let changes = collect_baseline_changes(&layout(&dir), &config).expect("collect");
 
-        let rels: Vec<_> = changes.iter().map(|c| c.rel.clone()).collect();
-        assert_eq!(rels, vec![PathBuf::from("small.md")]);
+        let rels: Vec<_> = changes.iter().map(|c| c.rel.as_str()).collect();
+        assert_eq!(rels, vec!["small.md"]);
     }
 
     #[test]
@@ -149,8 +130,7 @@ mod tests {
         let mut config = VaultConfig::defaults();
         config.watch_roots = vec!["does-not-exist".to_string()];
 
-        let changes =
-            collect_baseline_changes(&vault_paths(&dir), &config).expect("collect changes");
+        let changes = collect_baseline_changes(&layout(&dir), &config).expect("collect");
 
         assert!(changes.is_empty());
     }
@@ -165,11 +145,10 @@ mod tests {
         let mut config = VaultConfig::defaults();
         config.watch_roots = vec!["notes".to_string(), "docs".to_string()];
 
-        let changes =
-            collect_baseline_changes(&vault_paths(&dir), &config).expect("collect changes");
+        let changes = collect_baseline_changes(&layout(&dir), &config).expect("collect");
 
-        let rels: Vec<_> = changes.iter().map(|c| c.rel.clone()).collect();
-        assert!(rels.contains(&Path::new("notes").join("a.md")));
-        assert!(rels.contains(&Path::new("docs").join("b.md")));
+        let rels: Vec<_> = changes.iter().map(|c| c.rel.as_str()).collect();
+        assert!(rels.contains(&"notes/a.md"));
+        assert!(rels.contains(&"docs/b.md"));
     }
 }

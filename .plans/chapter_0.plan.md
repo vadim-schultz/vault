@@ -106,7 +106,7 @@ flowchart LR
 
 ### Internal storage (implementation detail — not user-facing)
 
-All git operations live in `src/storage/git.rs` using **gix**. Vault never shells out to the `git` binary. On `vault init`, the library:
+Git operations are implemented by the `GixObjectStore` adapter (`src/adapters/gix.rs`), which wraps the lower-level `src/storage/git.rs` helpers. Vault never shells out to the `git` binary. On `vault init`, the library:
 
 - Creates `.vault/.git/` with standard object/ref layout (separated git-dir; work-tree = vault root)
 - Never writes a `.git` file at the project root (coexists with an existing source-control repo)
@@ -169,7 +169,7 @@ enabled = true
 | `vault list` | Tracked files and latest version timestamp |
 | `vault ignore PATTERN` | Add an ignore glob (e.g. `*.pdf`) |
 
-Global flags: `--vault-path PATH` (auto-discover `.vault/` by walking up), `-v` / `--verbose`, `--version`, `--help`.
+Global flags: `--vault-path PATH` (vault root or `.vault/` path; default `./.vault` under the current directory), `-v` / `--verbose`, `--version`, `--help`.
 
 `<date>` accepts explicit timestamps only (MVP): `2026-06-01` (date, start of day UTC) or `2026-06-01 23:58` (date + time, local). Relative phrases (`2 weeks ago`) deferred to post-v0.1.
 
@@ -198,6 +198,7 @@ Global flags: `--vault-path PATH` (auto-discover `.vault/` by walking up), `-v` 
 | Service | Service-manager adapter (systemd on Linux; launchd/Windows deferred) |
 | Dates | `chrono` — snapshot timestamps (Chapter 4); CLI date parsing (Chapter 5) |
 | Config | `toml` + `serde` |
+| Logging | `daemon.log` append via `daemon::append_log` (structured `tracing` deferred) |
 
 Edition **2021**, MSRV **1.75** (stable toolchain via rustup).
 
@@ -207,7 +208,7 @@ Edition **2021**, MSRV **1.75** (stable toolchain via rustup).
 
 ## Repo layout (standard Rust binary crate)
 
-Single crate, binary + library ([Cargo book](https://doc.rust-lang.org/cargo/guide/project-layout.html) layout). Library modules live in `src/` next to `lib.rs`; only executable entry points belong in `src/bin/`.
+Single crate, binary + library ([Cargo book](https://doc.rust-lang.org/cargo/guide/project-layout.html) layout). After the ports-and-adapters refactor, the crate is layered: `domain` → `ports` → `app` / `adapters` → `cli` / `daemon` / `watcher`. See [architecture.plan.md](architecture.plan.md) for the full module tree.
 
 ```
 vault/
@@ -219,28 +220,31 @@ vault/
 ├── LICENSE
 ├── rustfmt.toml
 ├── src/
-│   ├── lib.rs              # crate root; all logic lives here as modules
-│   ├── cli.rs              # clap Parser + subcommand dispatch
+│   ├── lib.rs              # crate root; re-exports modules
 │   ├── error.rs
+│   ├── domain/             # pure types: RelPath, VaultLayout, FileChange, …
+│   ├── ports/              # trait boundaries (ObjectStore, MetaIndex, …)
+│   ├── adapters/           # gix, sqlite, toml registry, systemd, fakes
+│   ├── app/                # use-cases: init, snapshot, status, prune, add_ignore
+│   ├── cli/                # clap Parser, dispatch, render.rs
 │   ├── config.rs           # VaultConfig (toml load/save)
 │   ├── registry.rs         # global vault registry (registry.toml)
 │   ├── ignore.rs           # globset builder from config
 │   ├── walk.rs             # baseline file walk
-│   ├── snapshot.rs         # gix commit + sqlite insert
-│   ├── daemon.rs           # singleton lock, heartbeat, ensure_running
-│   ├── status.rs           # status report assembly
+│   ├── snapshot.rs         # commit orchestration (gix + sqlite)
+│   ├── daemon.rs           # singleton lock, heartbeat, run_foreground
+│   ├── paths.rs            # global state dir paths
 │   ├── storage/
 │   │   ├── mod.rs
 │   │   ├── git.rs          # gix: init, commit, read blob
-│   │   └── sqlite.rs       # schema + time-based queries
+│   │   └── sqlite/         # schema + time-based queries
 │   ├── watcher/            # notify debouncer + per-vault workers
 │   │   ├── mod.rs
 │   │   ├── router.rs
 │   │   └── worker.rs
-│   ├── service/            # ServiceManager trait + OS adapters
+│   ├── service/            # re-exports ServiceManager adapters
 │   │   ├── mod.rs
-│   │   ├── systemd.rs
-│   │   └── unsupported.rs
+│   │   └── constants.rs
 │   └── bin/
 │       └── vault.rs        # #[tokio::main] → vault::cli::run().await (thin entry)
 ├── tests/                  # integration tests (one crate per *.rs file)
@@ -249,6 +253,8 @@ vault/
 │   ├── watcher.rs
 │   ├── daemon.rs
 │   ├── status.rs
+│   ├── concurrency.rs
+│   ├── storage_paths.rs
 │   ├── show_at_date.rs
 │   └── common/
 │       └── mod.rs          # temp dirs, fixture helpers
@@ -273,7 +279,7 @@ vault/
 
 **Cargo layout (per the book):**
 
-- `src/lib.rs` + sibling modules (`cli.rs`, `storage/`, …) — the **library**; holds all logic, unit-testable.
+- `src/lib.rs` + layered modules — the **library**; holds all logic, unit-testable.
 - `src/bin/<name>.rs` — **executable entry points only**; one file = one binary. `src/bin/vault.rs` produces the `vault` binary.
 - Do **not** put library modules under `src/bin/` — that directory is exclusively for `fn main()`.
 - Use `src/main.rs` *or* `src/bin/vault.rs`, not both. We use `src/bin/vault.rs` so the entry point is explicit; omit `src/main.rs`.

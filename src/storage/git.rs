@@ -5,18 +5,24 @@ use std::path::{Path, PathBuf};
 use gix::create::{into as create_repo, Kind, Options};
 use gix::object::tree::EntryKind;
 
+use crate::domain::{FileChange, FileEventKind};
 use crate::error::VaultError;
-use crate::snapshot::{FileChange, FileEventKind};
 
-fn rel_path_str(path: &Path) -> String {
-    path.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
-fn git_error(err: impl std::fmt::Display) -> VaultError {
-    VaultError::Git(err.to_string())
+fn with_fallback_cwd<T>(
+    fallback: &Path,
+    action: impl FnOnce() -> Result<T, VaultError>,
+) -> Result<T, VaultError> {
+    let restore = if let Ok(current) = std::env::current_dir() {
+        Some(current)
+    } else {
+        std::env::set_current_dir(fallback)?;
+        None
+    };
+    let result = action();
+    if let Some(dir) = restore {
+        let _ = std::env::set_current_dir(dir);
+    }
+    result
 }
 
 /// Inputs shared by tree-edit handlers.
@@ -54,12 +60,12 @@ fn upsert_blob_in_tree(
     editor: &mut gix::object::tree::Editor<'_>,
     change: &FileChange,
 ) -> Result<(), VaultError> {
-    let abs = ctx.worktree.join(&change.rel);
+    let abs = ctx.worktree.join(change.rel.to_path());
     let data = std::fs::read(&abs).map_err(VaultError::Io)?;
-    let oid = ctx.repo.write_blob(&data).map_err(git_error)?;
+    let oid = ctx.repo.write_blob(&data).map_err(VaultError::git)?;
     editor
-        .upsert(rel_path_str(&change.rel), EntryKind::Blob, oid)
-        .map_err(git_error)?;
+        .upsert(change.rel.as_str(), EntryKind::Blob, oid)
+        .map_err(VaultError::git)?;
     Ok(())
 }
 
@@ -69,8 +75,8 @@ fn remove_path_from_tree(
     change: &FileChange,
 ) -> Result<(), VaultError> {
     editor
-        .remove(rel_path_str(&change.rel))
-        .map_err(git_error)?;
+        .remove(change.rel.as_str())
+        .map_err(VaultError::git)?;
     Ok(())
 }
 
@@ -94,19 +100,6 @@ impl GitStore {
         &self.worktree
     }
 
-    /// Write `data` as a blob and read it back (for tests and validation).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VaultError::Git`] when blob I/O fails.
-    pub fn write_and_read_blob(&self, data: &[u8]) -> Result<Vec<u8>, VaultError> {
-        let oid = self.repo.write_blob(data).map_err(git_error)?;
-
-        let object = self.repo.find_object(oid).map_err(git_error)?;
-        let blob = object.into_blob();
-        Ok(blob.data.clone())
-    }
-
     /// Build a tree from `changes` and create a commit on `HEAD`.
     ///
     /// Returns `None` when the tree would be unchanged.
@@ -119,7 +112,12 @@ impl GitStore {
         changes: &[FileChange],
         message: &str,
     ) -> Result<Option<String>, VaultError> {
-        with_worktree_cwd(&self.worktree, || self.commit_tree_inner(changes, message))
+        let restore = std::env::current_dir().ok();
+        let result = self.commit_tree_inner(changes, message);
+        if let Some(dir) = restore {
+            let _ = std::env::set_current_dir(dir);
+        }
+        result
     }
 
     fn commit_tree_inner(
@@ -141,13 +139,13 @@ impl GitStore {
         parent_tree: gix::ObjectId,
         changes: &[FileChange],
     ) -> Result<gix::ObjectId, VaultError> {
-        let mut editor = self.repo.edit_tree(parent_tree).map_err(git_error)?;
+        let mut editor = self.repo.edit_tree(parent_tree).map_err(VaultError::git)?;
         let ctx = TreeEditContext {
             repo: &self.repo,
             worktree: &self.worktree,
         };
         apply_tree_changes(&ctx, &mut editor, changes)?;
-        editor.write().map_err(git_error).map(gix::Id::detach)
+        editor.write().map_err(VaultError::git).map(gix::Id::detach)
     }
 
     fn create_head_commit(
@@ -166,7 +164,7 @@ impl GitStore {
         let commit_id = self
             .repo
             .commit_as(sig, sig, "HEAD", message, tree_id, parents)
-            .map_err(git_error)?;
+            .map_err(VaultError::git)?;
         Ok(commit_id.to_string())
     }
 
@@ -180,7 +178,10 @@ impl GitStore {
 
     fn parent_tree_id(&self) -> Result<gix::ObjectId, VaultError> {
         match self.repo.head_commit() {
-            Ok(commit) => commit.tree_id().map_err(git_error).map(gix::Id::detach),
+            Ok(commit) => commit
+                .tree_id()
+                .map_err(VaultError::git)
+                .map(gix::Id::detach),
             Err(_) => Ok(self.repo.empty_tree().id().detach()),
         }
     }
@@ -192,16 +193,12 @@ impl GitStore {
 ///
 /// Returns [`VaultError::Git`] when repository creation or open fails.
 pub fn init(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
-    if let Some(parent) = git_dir.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let git_dir = git_dir.to_path_buf();
-    let worktree = worktree.to_path_buf();
-
-    with_worktree_cwd(&worktree, || {
-        create_repo(&git_dir, Kind::Bare, Options::default()).map_err(git_error)?;
-        open_inner(&git_dir, &worktree)
+    with_fallback_cwd(worktree, || {
+        if let Some(parent) = git_dir.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        create_repo(git_dir, Kind::Bare, Options::default()).map_err(VaultError::git)?;
+        open(git_dir, worktree)
     })
 }
 
@@ -211,12 +208,8 @@ pub fn init(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
 ///
 /// Returns [`VaultError::Git`] when the repository cannot be opened.
 pub fn open(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
-    open_inner(git_dir, worktree)
-}
-
-fn open_inner(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
-    with_worktree_cwd(worktree, || {
-        let repo = gix::open(git_dir).map_err(git_error)?;
+    with_fallback_cwd(worktree, || {
+        let repo = gix::open(git_dir).map_err(VaultError::git)?;
         Ok(GitStore {
             repo,
             git_dir: git_dir.to_path_buf(),
@@ -225,47 +218,46 @@ fn open_inner(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
     })
 }
 
-fn with_worktree_cwd<T>(
-    worktree: &Path,
-    action: impl FnOnce() -> Result<T, VaultError>,
-) -> Result<T, VaultError> {
-    let restore = std::env::current_dir().ok();
-    std::env::set_current_dir(worktree)?;
-    let result = action();
-    if let Some(dir) = restore {
-        let _ = std::env::set_current_dir(dir);
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::RelPath;
+    use crate::domain::{FileChange, FileEventKind};
     use tempfile::TempDir;
+
+    fn init_store(dir: &TempDir) -> GitStore {
+        let worktree = dir.path().join("project");
+        let git_dir = dir.path().join(".vault").join(".git");
+        std::fs::create_dir_all(&worktree).expect("worktree");
+        init(&git_dir, &worktree).expect("init")
+    }
 
     #[test]
     fn init_creates_git_dir_with_objects() {
         let dir = TempDir::new().expect("tempdir");
-        let worktree = dir.path().join("project");
-        let git_dir = dir.path().join(".vault").join(".git");
-        std::fs::create_dir_all(&worktree).expect("worktree");
-
-        let store = init(&git_dir, &worktree).expect("init git");
-
+        let store = init_store(&dir);
         assert!(store.git_dir().join("objects").is_dir());
         assert!(store.git_dir().join("HEAD").is_file());
     }
 
     #[test]
-    fn blob_roundtrip() {
+    fn commit_succeeds_when_cwd_is_elsewhere() {
         let dir = TempDir::new().expect("tempdir");
-        let worktree = dir.path().join("project");
-        let git_dir = dir.path().join(".vault").join(".git");
-        std::fs::create_dir_all(&worktree).expect("worktree");
+        let other = TempDir::new().expect("other");
+        let restore = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(other.path()).expect("chdir");
 
-        let store = init(&git_dir, &worktree).expect("init git");
-        let data = b"hello vault";
-        let read_back = store.write_and_read_blob(data).expect("roundtrip");
-        assert_eq!(read_back, data);
+        let store = init_store(&dir);
+        std::fs::write(store.worktree().join("b.md"), b"b").expect("write");
+        let changes = vec![FileChange {
+            rel: RelPath::parse("b.md"),
+            kind: FileEventKind::Create,
+        }];
+        let sha = store
+            .commit_tree(&changes, "test")
+            .expect("commit")
+            .expect("sha");
+        assert!(!sha.is_empty());
+        std::env::set_current_dir(restore).expect("restore");
     }
 }

@@ -14,10 +14,26 @@
 * `vault init --no-service` and `VAULT_NO_SERVICE` to skip daemon startup (tests/CI).
 * Default ignore pattern `.git/**` for coexistence with foreign git directories at the project root.
 * `vault init` — creates `.vault/` with `config.toml`, recovery `README`, gix bare git-dir, and SQLite schema.
-* Storage modules: `gix` object store (`src/storage/git.rs`), `rusqlite` metadata index (`src/storage/sqlite.rs`).
+* Storage modules: `gix` object store (`src/storage/git.rs`), `rusqlite` metadata index (`src/storage/sqlite/`).
 * Integration tests for init layout, re-init guard, config defaults, and schema (`tests/init.rs`).
 * Cargo library + binary scaffold with async CLI (`clap`, `tokio`).
 * Stub subcommands: `init`, `show`, `restore`, `log`, `diff`, `status`, `list`, `ignore`.
 * GitHub Actions CI (`lint-test`, `build-test`, `docs`) and local `scripts/ci.sh` mirror.
 * Full mdBook site (getting started, architecture, CLI reference, releasing).
 * GitHub Pages deploy workflow (`deploy-docs.yml`).
+
+### Changed
+
+* Restructured the crate into `domain/`, `ports/`, `adapters/`, and `app/` use-cases with injected trait objects.
+* `vault status` is read-only — registry pruning moved to daemon reload (`PruneRegistry` use-case).
+* Watcher routing is a single pass; ignore patterns are applied once in the router.
+* `--vault-path` no longer implies auto-discovery — run commands from the vault root or pass the path explicitly.
+
+### Fixed
+
+* Daemon no longer hangs when the watcher task exits with an error.
+* Registry hot-reload is reliable across Tokio worker threads (shared reload state instead of thread-local).
+* A corrupt vault `config.toml` no longer prevents other registered vaults from being watched.
+* `vault status` no longer rewrites `registry.toml` via implicit pruning.
+* Git tree paths and SQLite `file_events.path` rows now share the same `RelPath` spelling.
+* Cross-vault commits are no longer serialized by a global lock or process-wide `chdir`.

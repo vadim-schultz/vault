@@ -8,7 +8,7 @@ Command-line interface for the `vault` binary.
 |------|-------------|
 | `--version` / `-V` | Print version (`vault 0.1.0`) |
 | `-v` / `--verbose` | Verbose output (reserved for later chapters) |
-| `--vault-path PATH` | Path to the `.vault/` directory (auto-discovered when omitted) |
+| `--vault-path PATH` | Path to the `.vault/` directory (default: `./.vault` under the current directory) |
 
 ## Subcommands
 

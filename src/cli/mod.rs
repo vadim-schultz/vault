@@ -1,14 +1,14 @@
 //! CLI argument parsing and subcommand dispatch.
 
+mod render;
+
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
-use crate::config;
+use crate::app::{add_ignore, init, status};
 use crate::daemon;
 use crate::error::VaultError;
-use crate::init;
 use crate::paths;
-use crate::status;
 
 /// Automatic version history.
 #[derive(Debug, Parser)]
@@ -18,7 +18,7 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
-    /// Path to the `.vault/` directory (auto-discovered when omitted).
+    /// Path to the `.vault/` directory (default: `./.vault` under the current directory).
     #[arg(long, global = true)]
     pub vault_path: Option<std::path::PathBuf>,
 
@@ -92,7 +92,7 @@ pub enum Command {
 ///
 /// # Errors
 ///
-/// Returns an error when a subcommand fails or is not yet implemented.
+/// Returns an error when argument parsing or command execution fails.
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
     dispatch(cli).await
@@ -105,8 +105,10 @@ async fn dispatch(cli: Cli) -> Result<()> {
 
     match command {
         Command::Init { no_service } => {
-            let paths = run_blocking(move || init::initialize(cli.vault_path, no_service)).await?;
-            let vault_display = paths.vault_dir.display();
+            let ctx = init::InitContext::production();
+            let layout =
+                run_blocking(move || init::initialize(&ctx, cli.vault_path, no_service)).await?;
+            let vault_display = layout.vault_dir.display();
             println!("Vault initialized at {vault_display}");
             if cli.verbose {
                 eprintln!("initialized vault at {vault_display}");
@@ -114,15 +116,14 @@ async fn dispatch(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Status => {
-            let report = run_blocking(status::report).await?;
+            let report = run_blocking(status::report_default).await?;
             println!("{report}");
             Ok(())
         }
         Command::Ignore { pattern } => {
-            let vault_paths = paths::resolve_vault(cli.vault_path)?;
+            let layout = paths::resolve_vault(cli.vault_path)?;
             let pattern_for_msg = pattern.clone();
-            run_blocking(move || config::VaultConfig::add_ignore_pattern(&vault_paths, &pattern))
-                .await?;
+            run_blocking(move || add_ignore::add_pattern(&layout, &pattern)).await?;
             println!("Added ignore pattern: {pattern_for_msg}");
             Ok(())
         }
@@ -146,13 +147,9 @@ where
 }
 
 async fn run_daemon() -> Result<()> {
-    match daemon::run_foreground().await {
-        Ok(()) => Ok(()),
-        Err(VaultError::DaemonAlreadyRunning { pid }) => {
-            bail!("vault daemon already running (pid {pid})")
-        }
-        Err(err) => Err(anyhow::anyhow!(err)),
-    }
+    daemon::run_foreground()
+        .await
+        .map_err(|err| anyhow::anyhow!(err))
 }
 
 fn stub(name: &str) -> Result<()> {
@@ -161,6 +158,8 @@ fn stub(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     #[test]
@@ -172,5 +171,12 @@ mod tests {
     fn help_lists_subcommands() {
         let cli = Cli::try_parse_from(["vault", "init"]).expect("parse init");
         assert!(matches!(cli.command, Some(Command::Init { .. })));
+    }
+
+    #[test]
+    fn vault_path_help_does_not_promise_discovery() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(!help.contains("auto-discovered"));
+        assert!(help.contains("current directory"));
     }
 }

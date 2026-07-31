@@ -1,7 +1,8 @@
-//! Path resolution for vault initialization and discovery.
+//! Path resolution for vault initialization and global state.
 
 use std::path::{Path, PathBuf};
 
+use crate::domain::{vault_state, VaultLayout, VaultState};
 use crate::error::VaultError;
 
 /// Default `.vault/` directory name relative to the worktree.
@@ -40,90 +41,18 @@ pub const DAEMON_HEARTBEAT: &str = "daemon.json";
 /// Daemon log file.
 pub const DAEMON_LOG: &str = "daemon.log";
 
-/// Resolved paths for `vault init`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InitPaths {
-    /// Vault root (parent of `.vault/`).
-    pub worktree: PathBuf,
-    /// `.vault/` directory path.
-    pub vault_dir: PathBuf,
-}
+/// Serialize unit tests that override [`STATE_DIR_ENV`].
+#[cfg(test)]
+pub static STATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-impl InitPaths {
-    /// Path to `.vault/config.toml`.
-    #[must_use]
-    pub fn config_path(&self) -> PathBuf {
-        self.vault_dir.join(CONFIG_FILE)
-    }
-
-    /// Path to `.vault/meta.db`.
-    #[must_use]
-    pub fn meta_db_path(&self) -> PathBuf {
-        self.vault_dir.join(META_DB)
-    }
-
-    /// Path to `.vault/.git/`.
-    #[must_use]
-    pub fn git_dir_path(&self) -> PathBuf {
-        self.vault_dir.join(GIT_DIR)
-    }
-
-    /// Path to `.vault/README`.
-    #[must_use]
-    pub fn readme_path(&self) -> PathBuf {
-        self.vault_dir.join(README_FILE)
-    }
-}
-
-/// Resolved paths for an existing vault.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VaultPaths {
-    /// Vault root (parent of `.vault/`).
-    pub worktree: PathBuf,
-    /// `.vault/` directory path.
-    pub vault_dir: PathBuf,
-}
-
-impl VaultPaths {
-    /// Path to `.vault/config.toml`.
-    #[must_use]
-    pub fn config_path(&self) -> PathBuf {
-        self.vault_dir.join(CONFIG_FILE)
-    }
-
-    /// Path to `.vault/meta.db`.
-    #[must_use]
-    pub fn meta_db_path(&self) -> PathBuf {
-        self.vault_dir.join(META_DB)
-    }
-
-    /// Path to `.vault/.git/`.
-    #[must_use]
-    pub fn git_dir_path(&self) -> PathBuf {
-        self.vault_dir.join(GIT_DIR)
-    }
-}
-
-impl From<InitPaths> for VaultPaths {
-    fn from(paths: InitPaths) -> Self {
-        Self {
-            worktree: paths.worktree,
-            vault_dir: paths.vault_dir,
-        }
-    }
-}
-
-/// Return whether a vault directory already contains init artifacts.
+/// Return whether service install/start should be skipped.
 #[must_use]
-pub fn is_initialized(vault_dir: &Path) -> bool {
-    [CONFIG_FILE, META_DB, GIT_DIR, README_FILE]
-        .iter()
-        .any(|name| vault_dir.join(name).exists())
+pub fn skip_service() -> bool {
+    std::env::var(NO_SERVICE_ENV)
+        .is_ok_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
 }
 
 /// Return the global vault state directory path.
-///
-/// The path may not exist yet; call [`ensure_state_dir`] before writing into it.
 ///
 /// # Errors
 ///
@@ -154,19 +83,10 @@ fn state_dir_from_env() -> Option<PathBuf> {
 }
 
 /// Return the default per-user state directory for this platform.
-///
-/// # Errors
-///
-/// Returns [`VaultError::Io`] when the data directory cannot be resolved.
 fn default_state_dir() -> Result<PathBuf, VaultError> {
     directories::ProjectDirs::from("", "", "vault")
-        .ok_or_else(|| {
-            VaultError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "could not resolve user data directory",
-            ))
-        })
         .map(|dirs| dirs.data_dir().to_path_buf())
+        .ok_or(VaultError::StateDirUnresolved)
 }
 
 /// Return the path to `registry.toml`.
@@ -214,29 +134,24 @@ pub fn daemon_log_path() -> Result<PathBuf, VaultError> {
     Ok(state_dir()?.join(DAEMON_LOG))
 }
 
-/// Serialize unit tests that override [`STATE_DIR_ENV`].
-#[cfg(test)]
-pub static STATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-#[must_use]
-pub fn skip_service() -> bool {
-    std::env::var(NO_SERVICE_ENV)
-        .is_ok_and(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
-}
-
 /// Resolve worktree and `.vault/` paths for initialization.
 ///
 /// # Errors
 ///
 /// Returns [`VaultError::InvalidVaultPath`] when `--vault-path` has no parent,
 /// or [`VaultError::AlreadyInitialized`] when init markers are present.
-pub fn resolve_init(vault_path: Option<PathBuf>) -> Result<InitPaths, VaultError> {
-    let paths = resolve_vault_paths(vault_path)?;
-    if is_initialized(&paths.vault_dir) {
-        return Err(VaultError::AlreadyInitialized {
-            path: paths.vault_dir,
-        });
+pub fn resolve_init(vault_path: Option<PathBuf>) -> Result<VaultLayout, VaultError> {
+    let layout = resolve_layout(vault_path)?;
+    match vault_state(&layout.vault_dir) {
+        VaultState::Absent => Ok(layout),
+        VaultState::Ready => Err(VaultError::AlreadyInitialized {
+            path: layout.vault_dir,
+        }),
+        VaultState::Partial(found) => Err(VaultError::PartialVault {
+            path: layout.vault_dir,
+            found: found.join(", "),
+        }),
     }
-    Ok(paths)
 }
 
 /// Resolve paths for an existing vault.
@@ -244,28 +159,25 @@ pub fn resolve_init(vault_path: Option<PathBuf>) -> Result<InitPaths, VaultError
 /// # Errors
 ///
 /// Returns [`VaultError::VaultNotFound`] when no `.vault/` exists.
-pub fn resolve_vault(vault_path: Option<PathBuf>) -> Result<VaultPaths, VaultError> {
-    let paths = resolve_vault_paths(vault_path)?;
-    if !is_initialized(&paths.vault_dir) {
-        return Err(VaultError::VaultNotFound {
-            start: paths.worktree,
-        });
+pub fn resolve_vault(vault_path: Option<PathBuf>) -> Result<VaultLayout, VaultError> {
+    let layout = resolve_layout(vault_path)?;
+    match vault_state(&layout.vault_dir) {
+        VaultState::Ready => Ok(layout),
+        VaultState::Absent => Err(VaultError::VaultNotFound {
+            start: layout.worktree,
+        }),
+        VaultState::Partial(found) => Err(VaultError::PartialVault {
+            path: layout.vault_dir,
+            found: found.join(", "),
+        }),
     }
-    Ok(VaultPaths {
-        worktree: paths.worktree,
-        vault_dir: paths.vault_dir,
-    })
 }
 
-fn resolve_vault_paths(vault_path: Option<PathBuf>) -> Result<InitPaths, VaultError> {
+fn resolve_layout(vault_path: Option<PathBuf>) -> Result<VaultLayout, VaultError> {
     match vault_path {
         None => {
             let worktree = std::env::current_dir()?;
-            let vault_dir = worktree.join(VAULT_DIR);
-            Ok(InitPaths {
-                worktree,
-                vault_dir,
-            })
+            Ok(VaultLayout::from_worktree(worktree))
         }
         Some(vault_path) => {
             let vault_dir = vault_path;
@@ -273,28 +185,17 @@ fn resolve_vault_paths(vault_path: Option<PathBuf>) -> Result<InitPaths, VaultEr
                 .parent()
                 .ok_or_else(|| VaultError::InvalidVaultPath {
                     path: vault_dir.clone(),
-                })?;
-            Ok(InitPaths {
-                worktree: worktree.to_path_buf(),
-                vault_dir,
-            })
+                })?
+                .to_path_buf();
+            Ok(VaultLayout::from_vault_dir(vault_dir, worktree))
         }
     }
 }
 
-/// Discover `.vault/` by walking up from `start`.
+/// Return whether a vault directory is fully initialized.
 #[must_use]
-pub fn discover_vault(start: &Path) -> Option<PathBuf> {
-    let mut current = start.canonicalize().ok()?;
-    loop {
-        let vault_dir = current.join(VAULT_DIR);
-        if vault_dir.join(CONFIG_FILE).is_file() {
-            return Some(vault_dir);
-        }
-        if !current.pop() {
-            return None;
-        }
-    }
+pub fn is_initialized(vault_dir: &Path) -> bool {
+    matches!(vault_state(vault_dir), VaultState::Ready)
 }
 
 #[cfg(test)]
@@ -306,13 +207,15 @@ mod tests {
     #[test]
     fn resolve_init_defaults_to_cwd_vault() {
         let dir = TempDir::new().expect("tempdir");
+        let restore = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir");
         let expected = dir.path().join(VAULT_DIR);
 
-        std::env::set_current_dir(dir.path()).expect("chdir");
-        let paths = resolve_init(None).expect("resolve");
+        let layout = resolve_init(None).expect("resolve");
 
-        assert_eq!(paths.vault_dir, expected);
-        assert_eq!(paths.worktree, dir.path());
+        assert_eq!(layout.vault_dir, expected);
+        assert_eq!(layout.worktree, dir.path());
+        std::env::set_current_dir(restore).expect("restore cwd");
     }
 
     #[test]
@@ -321,19 +224,12 @@ mod tests {
         let vault_dir = dir.path().join(VAULT_DIR);
         fs::create_dir_all(&vault_dir).expect("mkdir");
         fs::write(vault_dir.join(META_DB), b"").expect("touch meta.db");
+        fs::write(vault_dir.join(CONFIG_FILE), b"x").expect("config");
+        fs::create_dir_all(vault_dir.join(GIT_DIR)).expect("git");
+        fs::write(vault_dir.join(README_FILE), b"x").expect("readme");
 
         let err = resolve_init(Some(vault_dir)).expect_err("should fail");
         assert!(matches!(err, VaultError::AlreadyInitialized { .. }));
-    }
-
-    #[test]
-    fn is_initialized_detects_readme() {
-        let dir = TempDir::new().expect("tempdir");
-        let vault_dir = dir.path().join(VAULT_DIR);
-        fs::create_dir_all(&vault_dir).expect("mkdir");
-        fs::write(vault_dir.join(README_FILE), b"partial").expect("touch README");
-
-        assert!(is_initialized(&vault_dir));
     }
 
     #[test]
@@ -343,19 +239,5 @@ mod tests {
         std::env::set_var(STATE_DIR_ENV, dir.path());
         assert_eq!(state_dir().expect("state dir"), dir.path());
         std::env::remove_var(STATE_DIR_ENV);
-    }
-
-    #[test]
-    fn discover_vault_finds_parent() {
-        let dir = TempDir::new().expect("tempdir");
-        let vault_dir = dir.path().join(VAULT_DIR);
-        fs::create_dir_all(&vault_dir).expect("mkdir");
-        fs::write(vault_dir.join(CONFIG_FILE), "watch_roots = [\".\"]\n").expect("config");
-
-        let nested = dir.path().join("docs").join("deep");
-        fs::create_dir_all(&nested).expect("mkdir nested");
-
-        let found = discover_vault(&nested).expect("discover");
-        assert_eq!(found, vault_dir.canonicalize().expect("canon"));
     }
 }
