@@ -28,14 +28,10 @@ impl MetaDb {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
-        )?;
-        let table_count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'",
-            [],
-            |row| row.get(0),
-        )?;
+        conn.execute_batch(queries::CONNECTION_PRAGMAS)?;
+        let table_count: i64 = conn.query_row(queries::COUNT_SNAPSHOTS_TABLE, [], |row| {
+            row.get(0)
+        })?;
         if table_count == 0 {
             conn.execute_batch(queries::SCHEMA)?;
         }

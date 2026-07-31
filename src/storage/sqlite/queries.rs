@@ -1,5 +1,13 @@
 //! SQL statements for the vault metadata index (`meta.db`).
 
+/// Connection pragmas applied on every open.
+pub const CONNECTION_PRAGMAS: &str =
+    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;";
+
+/// Return 1 when the `snapshots` table exists (schema already applied).
+pub const COUNT_SNAPSHOTS_TABLE: &str =
+    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'";
+
 /// Schema applied on `vault init`.
 pub const SCHEMA: &str = "
 CREATE TABLE snapshots (

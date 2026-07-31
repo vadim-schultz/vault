@@ -72,16 +72,11 @@ pub enum VaultState {
 /// Return the initialization state of `vault_dir`.
 #[must_use]
 pub fn vault_state(vault_dir: &Path) -> VaultState {
-    const MARKERS: &[(&str, &str)] = &[
-        (CONFIG_FILE, "config.toml"),
-        (META_DB, "meta.db"),
-        (GIT_DIR, ".git"),
-        (README_FILE, "README"),
-    ];
+    const MARKERS: &[&str] = &[CONFIG_FILE, META_DB, GIT_DIR, README_FILE];
     let present: Vec<&str> = MARKERS
         .iter()
-        .filter(|(name, _)| vault_dir.join(name).exists())
-        .map(|(_, label)| *label)
+        .filter(|name| vault_dir.join(name).exists())
+        .copied()
         .collect();
     match present.len() {
         0 => VaultState::Absent,
@@ -103,7 +98,10 @@ mod tests {
         fs::create_dir_all(&vault_dir).expect("mkdir");
         fs::write(vault_dir.join(README_FILE), b"x").expect("write");
 
-        assert_eq!(vault_state(&vault_dir), VaultState::Partial(vec!["README"]));
+        assert_eq!(
+            vault_state(&vault_dir),
+            VaultState::Partial(vec![README_FILE])
+        );
     }
 
     #[test]
