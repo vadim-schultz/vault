@@ -11,8 +11,12 @@ flowchart TB
     subgraph dayOne [Day one]
         Init["vault init"]
     end
+    subgraph global [Per user]
+        Registry[registry.toml]
+        Daemon[Singleton daemon]
+    end
     subgraph ongoing [Ongoing - automatic]
-        Watcher[Background watcher]
+        Watcher[Filesystem watcher]
         Snap[Snapshot on change]
     end
     subgraph later [Weeks later]
@@ -20,8 +24,11 @@ flowchart TB
         Restore["vault restore --at DATE"]
     end
 
-    Init --> Watcher
-    Docs[Your documents] -->|save| Watcher
+    Init --> Registry
+    Init --> Daemon
+    Registry -->|hot reload| Watcher
+    Daemon --> Watcher
+    Docs[Your documents] -->|notify events| Watcher
     Watcher --> Snap
     Snap --> VaultStore[.vault/]
     Show --> VaultStore
@@ -39,14 +46,22 @@ flowchart LR
         MetaDB[meta.db]
         Readme[README]
     end
-    Watcher[Background watcher]
-    CLI[vault show/log/restore]
+    subgraph stateDir [Global state dir]
+        Reg[registry.toml]
+        Lock[daemon.lock]
+        Beat[daemon.json]
+    end
+    Daemon[Singleton daemon]
+    CLI[vault show/log/restore/status]
 
-    Docs -->|inotify events| Watcher
-    Watcher -->|gix commit| GitDir
-    Watcher -->|rusqlite insert| MetaDB
+    Docs -->|notify events| Daemon
+    Reg -->|watch + reload| Daemon
+    Daemon -->|gix commit| GitDir
+    Daemon -->|rusqlite insert| MetaDB
     CLI -->|resolve --at date| MetaDB
     CLI -->|gix read blob| GitDir
+    CLI --> Beat
+    CLI --> Reg
 ```
 
 ## `.vault/` layout
@@ -69,7 +84,37 @@ After `vault init` (Chapter 3), each vault root contains:
 
 Vault uses a **separated git-dir** inside `.vault/.git/`. The work-tree is the vault root.
 Vault never writes a `.git` file at the project root, so it can coexist with an existing
-source-control repository.
+source-control repository (foreign `.git/` directories at the project root are ignored by default).
+
+## Global state (singleton daemon)
+
+One background process per user watches **all** registered vaults. `vault init` appends the
+vault root to a global registry and ensures the daemon is running.
+
+| Path (Linux) | Purpose |
+|--------------|---------|
+| `~/.local/share/vault/registry.toml` | Registered vault roots (human-readable, hand-editable) |
+| `~/.local/share/vault/registry.lock` | Mutex for atomic registry updates |
+| `~/.local/share/vault/daemon.lock` | Advisory lock — singleton enforcement |
+| `~/.local/share/vault/daemon.json` | Heartbeat: pid, started_at, updated_at, vault_count, version |
+| `~/.local/share/vault/daemon.log` | Append-only daemon log |
+
+Override the state directory with `VAULT_STATE_DIR` (tests and power users). macOS and Windows
+paths follow `directories::ProjectDirs` conventions.
+
+```toml
+# registry.toml
+version = 1
+
+[[vault]]
+root = "/home/me/notes"
+registered_at = "2026-07-30T12:00:00Z"
+enabled = true
+```
+
+The daemon watches `registry.toml` with the same `notify` backend used for document files, so new
+vaults are picked up without restart. Writes are atomic: acquire `registry.lock`, write
+`registry.toml.tmp`, then `rename` over the target.
 
 ## Internal implementation (not user-facing)
 
@@ -79,8 +124,10 @@ All git operations live in `src/storage/git.rs` using **gix**. Vault never shell
 - A gix commit records changed blobs with messages like `vault: update docs/arch.md @ 2026-07-29T14:32:01Z`
 - A row is inserted into SQLite linking paths, commit SHA, and timestamps
 
-The background watcher (Chapter 4) uses `notify` (inotify on Linux) with debouncing. Watching
-starts automatically on `init` via a **systemd user service** — users do not run a manual daemon.
+The singleton background watcher (Chapter 4) uses `notify` (inotify on Linux, FSEvents on macOS,
+`ReadDirectoryChangesW` on Windows) with debouncing. Watching starts automatically on `vault init`
+via a **systemd user unit** (`vault-watcher.service`) when available; otherwise the CLI spawns a
+detached `vault daemon` child and warns that login autostart is not configured.
 
 See the [CLI reference](cli.md) for user-facing commands.
 

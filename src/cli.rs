@@ -3,8 +3,12 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
+use crate::config;
+use crate::daemon;
+use crate::error::VaultError;
 use crate::init;
 use crate::paths;
+use crate::status;
 
 /// Automatic version history.
 #[derive(Debug, Parser)]
@@ -26,7 +30,11 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize a vault in the current directory.
-    Init,
+    Init {
+        /// Skip installing or starting the background daemon.
+        #[arg(long)]
+        no_service: bool,
+    },
     /// Show a file as it was at a given timestamp.
     Show {
         /// Path to the file.
@@ -71,6 +79,13 @@ pub enum Command {
         /// Glob pattern to ignore (e.g. `*.pdf`).
         pattern: String,
     },
+    /// Run the singleton background watcher (hidden).
+    #[command(hide = true)]
+    Daemon {
+        /// Run in the foreground (used by systemd and tests).
+        #[arg(long)]
+        foreground: bool,
+    },
 }
 
 /// Run the CLI, parsing arguments from the environment.
@@ -89,26 +104,54 @@ async fn dispatch(cli: Cli) -> Result<()> {
     };
 
     match command {
-        Command::Init => {
-            let paths = paths::resolve_init(cli.vault_path)?;
-            let verbose = cli.verbose;
-            let vault_display = paths.vault_dir.display().to_string();
-            tokio::task::spawn_blocking(move || init::run(&paths))
-                .await?
-                .map_err(|e| anyhow::anyhow!(e))?;
+        Command::Init { no_service } => {
+            let paths = run_blocking(move || init::initialize(cli.vault_path, no_service)).await?;
+            let vault_display = paths.vault_dir.display();
             println!("Vault initialized at {vault_display}");
-            if verbose {
+            if cli.verbose {
                 eprintln!("initialized vault at {vault_display}");
             }
             Ok(())
         }
+        Command::Status => {
+            let report = run_blocking(status::report).await?;
+            println!("{report}");
+            Ok(())
+        }
+        Command::Ignore { pattern } => {
+            let vault_paths = paths::resolve_vault(cli.vault_path)?;
+            let pattern_for_msg = pattern.clone();
+            run_blocking(move || config::VaultConfig::add_ignore_pattern(&vault_paths, &pattern))
+                .await?;
+            println!("Added ignore pattern: {pattern_for_msg}");
+            Ok(())
+        }
+        Command::Daemon { foreground: _ } => run_daemon().await,
         Command::Show { .. } => stub("show"),
         Command::Restore { .. } => stub("restore"),
         Command::Log { .. } => stub("log"),
         Command::Diff { .. } => stub("diff"),
-        Command::Status => stub("status"),
         Command::List => stub("list"),
-        Command::Ignore { .. } => stub("ignore"),
+    }
+}
+
+async fn run_blocking<F, T>(f: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T, VaultError> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await?
+        .map_err(|err| anyhow::anyhow!(err))
+}
+
+async fn run_daemon() -> Result<()> {
+    match daemon::run_foreground().await {
+        Ok(()) => Ok(()),
+        Err(VaultError::DaemonAlreadyRunning { pid }) => {
+            bail!("vault daemon already running (pid {pid})")
+        }
+        Err(err) => Err(anyhow::anyhow!(err)),
     }
 }
 
@@ -128,6 +171,6 @@ mod tests {
     #[test]
     fn help_lists_subcommands() {
         let cli = Cli::try_parse_from(["vault", "init"]).expect("parse init");
-        assert!(matches!(cli.command, Some(Command::Init)));
+        assert!(matches!(cli.command, Some(Command::Init { .. })));
     }
 }

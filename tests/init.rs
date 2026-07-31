@@ -11,6 +11,7 @@ use vault::paths::{CONFIG_FILE, GIT_DIR, META_DB, VAULT_DIR};
 
 #[test]
 fn init_creates_vault_layout() {
+    let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
     common::assert_vault_layout(dir.path());
@@ -19,6 +20,7 @@ fn init_creates_vault_layout() {
 
 #[test]
 fn init_rejects_second_run() {
+    let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
     common::vault_bin()
@@ -31,6 +33,7 @@ fn init_rejects_second_run() {
 
 #[test]
 fn init_does_not_touch_root_git() {
+    let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     let git_dir = dir.path().join(GIT_DIR);
     fs::create_dir(&git_dir).expect("create root .git");
@@ -48,6 +51,7 @@ fn init_does_not_touch_root_git() {
 
 #[test]
 fn config_has_default_ignores() {
+    let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
 
@@ -60,6 +64,7 @@ fn config_has_default_ignores() {
 
 #[test]
 fn sqlite_schema_matches_spec() {
+    let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
 

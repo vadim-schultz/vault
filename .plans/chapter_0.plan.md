@@ -15,7 +15,7 @@ todos:
     content: "Chapter 3: vault init, .vault/ layout, .vault/.git + SQLite schema (TDD)"
     status: pending
   - id: ch4-watcher
-    content: "Chapter 4: Auto-start watcher on init (systemd user unit), inotify snapshots via gix + sqlite"
+    content: "Chapter 4: Singleton daemon + registry.toml, notify snapshots via gix + sqlite"
     status: pending
   - id: ch5-timetravel
     content: "Chapter 5: vault show/log/diff/restore/list/status with --at date resolution"
@@ -116,6 +116,39 @@ Users do not need to know any of this. The `.vault/README` documents the layout 
 
 ---
 
+## Global state (singleton daemon)
+
+Per-user state (not per vault). Resolved via `directories` crate; override with `VAULT_STATE_DIR`:
+
+| Platform | Default path |
+|----------|--------------|
+| Linux | `~/.local/share/vault/` |
+| macOS | `~/Library/Application Support/vault/` |
+| Windows | `%APPDATA%\vault\data\` |
+
+```text
+<state_dir>/
+├── registry.toml    # list of vault roots (human-readable)
+├── registry.lock    # write mutex for atomic registry updates
+├── daemon.lock      # advisory lock → singleton enforcement
+├── daemon.json      # heartbeat (pid, vault_count, updated_at)
+└── daemon.log       # append-only daemon log
+```
+
+```toml
+# registry.toml
+version = 1
+
+[[vault]]
+root = "/home/me/notes"
+registered_at = "2026-07-30T12:00:00Z"
+enabled = true
+```
+
+`vault init` registers the vault root here, then ensures the singleton daemon is running. The daemon watches `registry.toml` itself (via `notify`) and hot-reloads its watch set when new vaults are added — no signals or IPC required, portable across OSes.
+
+---
+
 ## CLI command design
 
 **Primary workflow** (what users actually do):
@@ -140,7 +173,7 @@ Global flags: `--vault-path PATH` (auto-discover `.vault/` by walking up), `-v` 
 
 `<date>` accepts explicit timestamps only (MVP): `2026-06-01` (date, start of day UTC) or `2026-06-01 23:58` (date + time, local). Relative phrases (`2 weeks ago`) deferred to post-v0.1.
 
-**Not exposed to users:** `vault watch` — watching starts automatically on `init` via a **systemd user service** (`vault-watcher@.service`). No manual daemon management.
+**Not exposed to users:** `vault watch` — watching starts automatically on `init` via a **singleton background daemon** (one process per user, all vaults). On Linux, `vault init` installs a systemd user unit (`vault-watcher.service`) that runs the hidden `vault daemon` subcommand. No manual daemon management.
 
 **Not in v0.1** (defer): multi-machine sync, encryption, retention/prune policies, macOS/Windows.
 
@@ -157,9 +190,13 @@ Global flags: `--vault-path PATH` (auto-discover `.vault/` by walking up), `-v` 
 | Git | `gix` — all init/commit/read in Rust; **never** shell out to `git` CLI |
 | SQLite | `rusqlite` (`bundled` feature for portable builds) |
 | Runtime | `tokio` (full runtime from day one — not a later add-on) |
-| FS watch | `notify` + `tokio` channel (inotify on Linux) |
-| Service | systemd user unit installed/enabled by `vault init` |
-| Dates | `chrono` — parse `YYYY-MM-DD` and `YYYY-MM-DD HH:MM` only |
+| FS watch | `notify` + `notify-debouncer-full` (inotify / FSEvents / `ReadDirectoryChangesW`) |
+| Ignore globs | `globset` |
+| Baseline walk | `walkdir` |
+| Singleton lock | `fs4` (advisory file lock, cross-platform) |
+| State paths | `directories` (`$XDG_DATA_HOME/vault/`; override with `VAULT_STATE_DIR`) |
+| Service | Service-manager adapter (systemd on Linux; launchd/Windows deferred) |
+| Dates | `chrono` — snapshot timestamps (Chapter 4); CLI date parsing (Chapter 5) |
 | Config | `toml` + `serde` |
 
 Edition **2021**, MSRV **1.75** (stable toolchain via rustup).
@@ -186,17 +223,32 @@ vault/
 │   ├── cli.rs              # clap Parser + subcommand dispatch
 │   ├── error.rs
 │   ├── config.rs           # VaultConfig (toml load/save)
+│   ├── registry.rs         # global vault registry (registry.toml)
+│   ├── ignore.rs           # globset builder from config
+│   ├── walk.rs             # baseline file walk
+│   ├── snapshot.rs         # gix commit + sqlite insert
+│   ├── daemon.rs           # singleton lock, heartbeat, ensure_running
+│   ├── status.rs           # status report assembly
 │   ├── storage/
 │   │   ├── mod.rs
 │   │   ├── git.rs          # gix: init, commit, read blob
 │   │   └── sqlite.rs       # schema + time-based queries
-│   ├── watcher.rs          # async notify loop + debounce
-│   ├── service.rs          # systemd user unit install/start
+│   ├── watcher/            # notify debouncer + per-vault workers
+│   │   ├── mod.rs
+│   │   ├── router.rs
+│   │   └── worker.rs
+│   ├── service/            # ServiceManager trait + OS adapters
+│   │   ├── mod.rs
+│   │   ├── systemd.rs
+│   │   └── unsupported.rs
 │   └── bin/
 │       └── vault.rs        # #[tokio::main] → vault::cli::run().await (thin entry)
 ├── tests/                  # integration tests (one crate per *.rs file)
 │   ├── init.rs
+│   ├── registry.rs
 │   ├── watcher.rs
+│   ├── daemon.rs
+│   ├── status.rs
 │   ├── show_at_date.rs
 │   └── common/
 │       └── mod.rs          # temp dirs, fixture helpers
@@ -225,7 +277,7 @@ vault/
 - `src/bin/<name>.rs` — **executable entry points only**; one file = one binary. `src/bin/vault.rs` produces the `vault` binary.
 - Do **not** put library modules under `src/bin/` — that directory is exclusively for `fn main()`.
 - Use `src/main.rs` *or* `src/bin/vault.rs`, not both. We use `src/bin/vault.rs` so the entry point is explicit; omit `src/main.rs`.
-- Add more binaries later if needed (e.g. `src/bin/vault-watch.rs`); for v0.1, `internal-watch` stays a hidden subcommand on the same `vault` binary.
+- For v0.1, `vault daemon` (hidden) runs the singleton watcher on the same `vault` binary.
 
 **Conventions:**
 
@@ -315,7 +367,7 @@ cargo install cargo-nextest   # faster test runner (optional)
 
 1. **Red:** `tests/init.rs` — `vault init` creates `.vault/{README,config.toml,.git,meta.db}`; second init fails.
 2. **Green:** Implement `vault::init()`:
-   - Write `config.toml` with sensible defaults (watch `.`, ignore `.vault/`, editor temps, `*.pdf`)
+   - Write `config.toml` with sensible defaults (watch `.`, ignore `.vault/`, editor temps)
    - Initialize `.vault/.git/` via **gix** (separated git-dir; no root `.git` file)
    - Create SQLite schema:
 
@@ -342,18 +394,21 @@ CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
 
 ---
 
-## Chapter 4 — Background watcher (automatic after init)
+## Chapter 4 — Singleton background watcher (automatic after init)
 
-**Goal:** After `vault init`, versioning runs without user intervention.
+**Goal:** After `vault init`, versioning runs without user intervention. One daemon watches all registered vaults.
 
-1. **Red:** test runs `vault init`, edits a file, waits for debounce, asserts new gix commit + `file_events` row.
+**Detailed plan:** [chapter_4.plan.md](chapter_4.plan.md)
+
+1. **Red:** tests for registry registration, multi-vault watcher, daemon singleton, `vault status`.
 2. **Green:**
-   - `vault init` installs and enables a **systemd user service** (`vault-watcher@<encoded-path>.service`) that runs `vault internal-watch` (hidden subcommand, not in help)
-   - Watcher uses `notify` + debounce; on stable file → gix commit + sqlite insert
-   - Respect `config.toml` ignore globs
-3. `vault status` reports watcher running/stopped and last snapshot time.
+   - `vault init` registers vault in global `registry.toml`, takes baseline snapshot, ensures singleton daemon
+   - Singleton `vault daemon` (hidden) watches `registry.toml` + all vault worktrees via `notify` + debounce
+   - On stable file change → gix commit + sqlite `file_events` insert; respect `config.toml` ignore globs
+   - Linux: install `vault-watcher.service` systemd user unit (one unit total, not per-directory)
+3. `vault status` reports daemon health, vault count, last snapshot per vault. `vault ignore` updates config.
 
-**Exit criteria:** edit a tracked `.md` file → snapshot appears within debounce window; `vault status` shows healthy watcher. CI uses foreground `vault internal-watch` (no systemd in CI).
+**Exit criteria:** edit a tracked `.md` file → snapshot within debounce window; hot-reload when registry grows; `vault status` healthy; CI uses `VAULT_NO_SERVICE=1` + `vault daemon --foreground` (no systemd in CI).
 
 ---
 
@@ -453,8 +508,14 @@ Each chapter = one feature branch → PR → green CI → merge. No chapter star
 | Large binary files in docs | Ignore `*.pdf`, `*.zip` by default in `config.toml` |
 | git + sqlite drift | Single code path for snapshot creation; integration tests assert both stores |
 | Vault `.git` vs project `.git` | gix separated git-dir inside `.vault/` only; never write root `.git` file |
-| Watcher not running after reboot | systemd user service with `Restart=on-failure`; `vault status` surfaces health |
-| systemd unavailable (containers, CI) | Hidden `vault internal-watch` for tests; init skips systemd when `$NOTIFY_SOCKET` unset and `--no-service` flag for dev |
+| Watcher not running after reboot | systemd user unit `vault-watcher.service` with `Restart=on-failure`; `vault status` surfaces heartbeat age |
+| systemd unavailable (containers, CI) | Hidden `vault daemon --foreground` for tests; `--no-service` / `VAULT_NO_SERVICE=1` skips service install |
+| inotify watch limits (many vaults) | One shared watcher instance; document `fs.inotify.max_user_watches` |
+| Registry corruption | `registry.lock` + temp-rename writes; `version` field in `registry.toml` |
+| Moved/deleted vault roots | Prune stale entries; warn in `vault status` |
+| Daemon dies silently | Heartbeat age in `vault status`; `Restart=on-failure` in systemd unit |
+| Snapshot feedback loop | `.vault/**` filtered before debounce |
+| Nested vaults | Route events to deepest matching vault root |
 
 ---
 
@@ -463,5 +524,7 @@ Each chapter = one feature branch → PR → green CI → merge. No chapter star
 - Relative date phrases (`2 weeks ago`, `yesterday`)
 - `vault config` subcommands (edit watch roots interactively)
 - Compression / retention policies (prune old snapshots)
-- macOS / Windows watchers and service managers
+- launchd + Windows Task Scheduler service adapters (stubs in v0.1)
+- Global cross-vault search over `registry.toml` + per-vault `meta.db`
+- `vault pause` / `vault resume`
 - `benches/` with `criterion` when watcher performance matters
