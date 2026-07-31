@@ -73,7 +73,6 @@ fn file_change_from_entry(
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn layout(dir: &TempDir) -> VaultLayout {

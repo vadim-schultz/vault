@@ -20,7 +20,6 @@ pub trait MetaIndex: Send + Sync {
 #[cfg(test)]
 pub mod contract {
     use super::*;
-    use crate::domain::{FileChange, FileEventKind, RelPath};
     use std::sync::Arc;
 
     /// Shared contract test for any `MetaIndex` implementation.
