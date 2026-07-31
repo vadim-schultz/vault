@@ -29,9 +29,8 @@ impl MetaDb {
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(queries::CONNECTION_PRAGMAS)?;
-        let table_count: i64 = conn.query_row(queries::COUNT_SNAPSHOTS_TABLE, [], |row| {
-            row.get(0)
-        })?;
+        let table_count: i64 =
+            conn.query_row(queries::COUNT_SNAPSHOTS_TABLE, [], |row| row.get(0))?;
         if table_count == 0 {
             conn.execute_batch(queries::SCHEMA)?;
         }
