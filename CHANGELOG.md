@@ -28,9 +28,13 @@
 * `vault status` is read-only — registry pruning moved to daemon reload (`PruneRegistry` use-case).
 * Watcher routing is a single pass; ignore patterns are applied once in the router.
 * `--vault-path` no longer implies auto-discovery — run commands from the vault root or pass the path explicitly.
+* Path classification moved to `domain::PathKind::classify`, a pure exhaustive match over missing, directory, file, and special paths.
+* A debounce batch reuses the vault's compiled `IgnoreMatcher` instead of rebuilding the glob set per batch.
 
 ### Fixed
 
+* A filesystem event on a **directory** no longer removes the entire subtree from the git tree. Directory events were classified as deletes, so touching a watched directory silently dropped every tracked file beneath it from the current tree.
+* Sockets, fifos, and device nodes are skipped rather than treated as file content.
 * Daemon no longer hangs when the watcher task exits with an error.
 * Registry hot-reload is reliable across Tokio worker threads (shared reload state instead of thread-local).
 * A corrupt vault `config.toml` no longer prevents other registered vaults from being watched.

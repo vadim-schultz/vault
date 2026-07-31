@@ -51,6 +51,43 @@ fn worker_commits_file_change() {
     assert!(snapshot_count(dir.path()) > baseline);
 }
 
+#[test]
+fn directory_event_does_not_remove_tracked_files() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("dir");
+    fs::create_dir_all(dir.path().join("research")).expect("mkdir");
+    fs::write(dir.path().join("research").join("sources.md"), b"x").expect("write");
+    common::init_in(dir.path());
+    let baseline = snapshot_count(dir.path());
+
+    let registry = VaultRegistry::load().expect("registry");
+    let router = vault::watcher::Router::from_registry(&registry).expect("router");
+    let (vault, paths) = router
+        .route(vec![dir.path().join("research")])
+        .into_iter()
+        .next()
+        .expect("directory routes to the vault");
+    vault::watcher::worker::commit_batch(&vault, &paths).expect("commit");
+
+    assert_eq!(
+        snapshot_count(dir.path()),
+        baseline,
+        "a directory event must not produce a snapshot"
+    );
+
+    let db = dir.path().join(VAULT_DIR).join(META_DB);
+    assert_eq!(
+        vault::storage::sqlite::latest_event_type(&db, "research").expect("query"),
+        None,
+        "a directory must never be recorded as a file event"
+    );
+    assert_eq!(
+        vault::storage::sqlite::latest_event_type(&db, "research/sources.md").expect("query"),
+        Some("create".to_string()),
+        "the tracked file must survive the directory event"
+    );
+}
+
 #[tokio::test]
 async fn edit_triggers_snapshot_in_correct_vault() {
     let _env = common::VaultEnv::new();

@@ -13,7 +13,12 @@ use crate::watcher::router::WatchedVault;
 ///
 /// Returns [`VaultError`] when change detection or snapshot fails.
 pub fn commit_batch(vault: &WatchedVault, rel_paths: &[RelPath]) -> Result<(), VaultError> {
-    let changes = changes_from_rel_paths(&vault.root, rel_paths, &vault.config)?;
+    let changes = changes_from_rel_paths(
+        &vault.root,
+        rel_paths,
+        &vault.ignore,
+        vault.config.watcher.max_file_bytes,
+    )?;
     if changes.is_empty() {
         return Ok(());
     }
