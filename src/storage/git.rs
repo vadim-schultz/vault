@@ -3,8 +3,76 @@
 use std::path::{Path, PathBuf};
 
 use gix::create::{into as create_repo, Kind, Options};
+use gix::object::tree::EntryKind;
 
 use crate::error::VaultError;
+use crate::snapshot::{FileChange, FileEventKind};
+
+fn rel_path_str(path: &Path) -> String {
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn git_error(err: impl std::fmt::Display) -> VaultError {
+    VaultError::Git(err.to_string())
+}
+
+/// Inputs shared by tree-edit handlers.
+struct TreeEditContext<'a> {
+    repo: &'a gix::Repository,
+    worktree: &'a Path,
+}
+
+type TreeChangeHandler = fn(
+    &TreeEditContext<'_>,
+    &mut gix::object::tree::Editor<'_>,
+    &FileChange,
+) -> Result<(), VaultError>;
+
+fn tree_handler_for(kind: FileEventKind) -> TreeChangeHandler {
+    match kind {
+        FileEventKind::Create | FileEventKind::Modify => upsert_blob_in_tree,
+        FileEventKind::Delete => remove_path_from_tree,
+    }
+}
+
+fn apply_tree_changes(
+    ctx: &TreeEditContext<'_>,
+    editor: &mut gix::object::tree::Editor<'_>,
+    changes: &[FileChange],
+) -> Result<(), VaultError> {
+    for change in changes {
+        tree_handler_for(change.kind)(ctx, editor, change)?;
+    }
+    Ok(())
+}
+
+fn upsert_blob_in_tree(
+    ctx: &TreeEditContext<'_>,
+    editor: &mut gix::object::tree::Editor<'_>,
+    change: &FileChange,
+) -> Result<(), VaultError> {
+    let abs = ctx.worktree.join(&change.rel);
+    let data = std::fs::read(&abs).map_err(VaultError::Io)?;
+    let oid = ctx.repo.write_blob(&data).map_err(git_error)?;
+    editor
+        .upsert(rel_path_str(&change.rel), EntryKind::Blob, oid)
+        .map_err(git_error)?;
+    Ok(())
+}
+
+fn remove_path_from_tree(
+    _ctx: &TreeEditContext<'_>,
+    editor: &mut gix::object::tree::Editor<'_>,
+    change: &FileChange,
+) -> Result<(), VaultError> {
+    editor
+        .remove(rel_path_str(&change.rel))
+        .map_err(git_error)?;
+    Ok(())
+}
 
 /// Handle to the vault's separated git-dir and worktree.
 pub struct GitStore {
@@ -32,24 +100,93 @@ impl GitStore {
     ///
     /// Returns [`VaultError::Git`] when blob I/O fails.
     pub fn write_and_read_blob(&self, data: &[u8]) -> Result<Vec<u8>, VaultError> {
-        let oid = self
-            .repo
-            .write_blob(data)
-            .map_err(|e| VaultError::Git(e.to_string()))?;
+        let oid = self.repo.write_blob(data).map_err(git_error)?;
 
-        let object = self
-            .repo
-            .find_object(oid)
-            .map_err(|e| VaultError::Git(e.to_string()))?;
+        let object = self.repo.find_object(oid).map_err(git_error)?;
         let blob = object.into_blob();
         Ok(blob.data.clone())
+    }
+
+    /// Build a tree from `changes` and create a commit on `HEAD`.
+    ///
+    /// Returns `None` when the tree would be unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError::Git`] when tree or commit operations fail.
+    pub fn commit_tree(
+        &self,
+        changes: &[FileChange],
+        message: &str,
+    ) -> Result<Option<String>, VaultError> {
+        with_worktree_cwd(&self.worktree, || self.commit_tree_inner(changes, message))
+    }
+
+    fn commit_tree_inner(
+        &self,
+        changes: &[FileChange],
+        message: &str,
+    ) -> Result<Option<String>, VaultError> {
+        let parent_tree = self.parent_tree_id()?;
+        let tree_id = self.build_tree_from_changes(parent_tree, changes)?;
+        if tree_id == parent_tree {
+            return Ok(None);
+        }
+        let commit_id = self.create_head_commit(message, tree_id)?;
+        Ok(Some(commit_id))
+    }
+
+    fn build_tree_from_changes(
+        &self,
+        parent_tree: gix::ObjectId,
+        changes: &[FileChange],
+    ) -> Result<gix::ObjectId, VaultError> {
+        let mut editor = self.repo.edit_tree(parent_tree).map_err(git_error)?;
+        let ctx = TreeEditContext {
+            repo: &self.repo,
+            worktree: &self.worktree,
+        };
+        apply_tree_changes(&ctx, &mut editor, changes)?;
+        editor.write().map_err(git_error).map(gix::Id::detach)
+    }
+
+    fn create_head_commit(
+        &self,
+        message: &str,
+        tree_id: gix::ObjectId,
+    ) -> Result<String, VaultError> {
+        let parents = self.head_parent_ids();
+        let mut time_buf = gix::date::parse::TimeBuf::default();
+        let signature = gix::actor::Signature {
+            name: "vault".into(),
+            email: "vault@localhost".into(),
+            time: gix::date::Time::now_utc(),
+        };
+        let sig = signature.to_ref(&mut time_buf);
+        let commit_id = self
+            .repo
+            .commit_as(sig, sig, "HEAD", message, tree_id, parents)
+            .map_err(git_error)?;
+        Ok(commit_id.to_string())
+    }
+
+    fn head_parent_ids(&self) -> Vec<gix::ObjectId> {
+        self.repo
+            .head_id()
+            .ok()
+            .map(|id| vec![id.detach()])
+            .unwrap_or_default()
+    }
+
+    fn parent_tree_id(&self) -> Result<gix::ObjectId, VaultError> {
+        match self.repo.head_commit() {
+            Ok(commit) => commit.tree_id().map_err(git_error).map(gix::Id::detach),
+            Err(_) => Ok(self.repo.empty_tree().id().detach()),
+        }
     }
 }
 
 /// Initialize a bare git repository at `git_dir` with external `worktree`.
-///
-/// The worktree path is recorded for later snapshot operations; the bare
-/// git-dir lives only under `.vault/.git/` with no root `.git` file.
 ///
 /// # Errors
 ///
@@ -63,15 +200,27 @@ pub fn init(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
     let worktree = worktree.to_path_buf();
 
     with_worktree_cwd(&worktree, || {
-        create_repo(&git_dir, Kind::Bare, Options::default())
-            .map_err(|e| VaultError::Git(e.to_string()))?;
+        create_repo(&git_dir, Kind::Bare, Options::default()).map_err(git_error)?;
+        open_inner(&git_dir, &worktree)
+    })
+}
 
-        let repo = gix::open(&git_dir).map_err(|e| VaultError::Git(e.to_string()))?;
+/// Open an existing vault git store.
+///
+/// # Errors
+///
+/// Returns [`VaultError::Git`] when the repository cannot be opened.
+pub fn open(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
+    open_inner(git_dir, worktree)
+}
 
+fn open_inner(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
+    with_worktree_cwd(worktree, || {
+        let repo = gix::open(git_dir).map_err(git_error)?;
         Ok(GitStore {
             repo,
-            git_dir: git_dir.clone(),
-            worktree: worktree.clone(),
+            git_dir: git_dir.to_path_buf(),
+            worktree: worktree.to_path_buf(),
         })
     })
 }

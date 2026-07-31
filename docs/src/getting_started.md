@@ -28,7 +28,14 @@ In a directory containing documents you want to version:
 ./target/release/vault init
 ```
 
-This creates `.vault/` with storage artifacts. A second `vault init` in the same directory fails.
+This creates `.vault/` with storage artifacts, registers the vault in the global registry, and
+starts the singleton background watcher. A second `vault init` in the same directory fails.
+
+Check watcher health:
+
+```bash
+./target/release/vault status
+```
 
 ## Verify the CLI
 
@@ -36,8 +43,8 @@ This creates `.vault/` with storage artifacts. A second `vault init` in the same
 ./target/release/vault --help
 ```
 
-Subcommands (`show`, `restore`, `log`, `diff`, `status`, `list`, `ignore`) are visible in
-`--help` but return **not implemented yet** until Chapters 4–5 land. `vault init` is implemented.
+`init`, `status`, and `ignore` are implemented. `show`, `restore`, `log`, `diff`, and `list`
+return **not implemented yet** until Chapter 5.
 
 ## Local documentation
 

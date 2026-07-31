@@ -1,9 +1,42 @@
 //! Shared helpers for integration tests.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use assert_cmd::Command;
+use tempfile::TempDir;
 use vault::paths::{CONFIG_FILE, GIT_DIR, META_DB, README_FILE, VAULT_DIR};
+
+static STATE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Isolated global state for one integration test.
+pub struct VaultEnv {
+    _state: TempDir,
+    state_path: PathBuf,
+    _env_lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl VaultEnv {
+    /// Create a temp state dir and set `VAULT_STATE_DIR` + `VAULT_NO_SERVICE`.
+    pub fn new() -> Self {
+        let env_lock = STATE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let state = TempDir::new().expect("temp state dir");
+        let state_path = state.path().to_path_buf();
+        std::env::set_var(vault::paths::STATE_DIR_ENV, &state_path);
+        std::env::set_var(vault::paths::NO_SERVICE_ENV, "1");
+        Self {
+            _state: state,
+            state_path,
+            _env_lock: env_lock,
+        }
+    }
+
+    /// Return the state directory path.
+    #[must_use]
+    pub fn state_path(&self) -> &Path {
+        &self.state_path
+    }
+}
 
 /// Return a `vault` binary command for integration tests.
 pub fn vault_bin() -> Command {
@@ -12,7 +45,12 @@ pub fn vault_bin() -> Command {
 
 /// Run `vault init` in `dir` and assert success.
 pub fn init_in(dir: &Path) -> assert_cmd::assert::Assert {
-    vault_bin().current_dir(dir).arg("init").assert().success()
+    vault_bin()
+        .env(vault::paths::NO_SERVICE_ENV, "1")
+        .current_dir(dir)
+        .arg("init")
+        .assert()
+        .success()
 }
 
 fn missing(name: &str) -> String {
@@ -44,4 +82,29 @@ pub fn assert_no_root_git(worktree: &Path) {
         "vault init must not create root {}",
         GIT_DIR
     );
+}
+
+/// Poll `predicate` until it returns true or `timeout` elapses.
+pub fn wait_for(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if predicate() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("timed out after {:?}", timeout);
+}
+
+/// Async variant for `#[tokio::test]` — does not block the runtime worker thread.
+pub async fn wait_for_async(timeout: Duration, mut predicate: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while start.elapsed() < timeout {
+        if predicate() {
+            return;
+        }
+        tokio::task::yield_now().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("timed out after {:?}", timeout);
 }
