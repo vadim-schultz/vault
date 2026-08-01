@@ -1,6 +1,7 @@
 //! Automatic version history — init once, retrieve any version later.
 
 pub mod adapters;
+pub mod at_date;
 pub mod app;
 pub mod cli;
 pub mod config;

@@ -55,3 +55,28 @@ WHERE created_at <= ?1
 ORDER BY created_at DESC, id DESC
 LIMIT 1
 ";
+
+/// All snapshots, newest first.
+pub const SELECT_ALL_SNAPSHOTS: &str =
+    "SELECT commit_sha, created_at FROM snapshots ORDER BY created_at DESC, id DESC";
+
+/// Snapshots that touched a specific path, with that path's event type, newest first.
+pub const SELECT_SNAPSHOTS_FOR_PATH: &str = "
+SELECT s.commit_sha, s.created_at, f.event_type
+FROM file_events f
+JOIN snapshots s ON f.snapshot_id = s.id
+WHERE f.path = ?1
+ORDER BY s.created_at DESC, s.id DESC
+";
+
+/// Latest non-delete event per path, ordered by path.
+pub const SELECT_TRACKED_FILES: &str = "
+SELECT f.path, s.created_at
+FROM file_events f
+JOIN snapshots s ON f.snapshot_id = s.id
+WHERE f.snapshot_id = (
+    SELECT MAX(f2.snapshot_id) FROM file_events f2 WHERE f2.path = f.path
+)
+AND f.event_type != 'delete'
+ORDER BY f.path
+";

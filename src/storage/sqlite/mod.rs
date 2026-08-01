@@ -125,6 +125,52 @@ impl MetaDb {
             Err(err) => Err(err.into()),
         }
     }
+
+    /// List snapshots, optionally scoped to a path, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn list_snapshots(
+        &self,
+        path: Option<&str>,
+    ) -> Result<Vec<(String, String, Option<String>)>, VaultError> {
+        match path {
+            Some(path) => self.list_snapshots_for_path(path),
+            None => self.list_all_snapshots(),
+        }
+    }
+
+    fn list_all_snapshots(&self) -> Result<Vec<(String, String, Option<String>)>, VaultError> {
+        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let mut stmt = conn.prepare(queries::SELECT_ALL_SNAPSHOTS)?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, None)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn list_snapshots_for_path(
+        &self,
+        path: &str,
+    ) -> Result<Vec<(String, String, Option<String>)>, VaultError> {
+        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let mut stmt = conn.prepare(queries::SELECT_SNAPSHOTS_FOR_PATH)?;
+        let rows = stmt.query_map(params![path], |row| {
+            Ok((row.get(0)?, row.get(1)?, Some(row.get(2)?)))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// List tracked files whose latest event is not a delete.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn list_tracked_files(&self) -> Result<Vec<(String, String)>, VaultError> {
+        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let mut stmt = conn.prepare(queries::SELECT_TRACKED_FILES)?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 /// Create `meta.db` and apply the vault schema.

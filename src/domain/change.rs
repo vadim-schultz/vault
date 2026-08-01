@@ -11,6 +11,8 @@ pub enum FileEventKind {
     Modify,
     /// File was deleted.
     Delete,
+    /// Content was written by `vault restore`, not an organic edit.
+    Restore,
 }
 
 impl FileEventKind {
@@ -21,6 +23,19 @@ impl FileEventKind {
             Self::Create => "create",
             Self::Modify => "modify",
             Self::Delete => "delete",
+            Self::Restore => "restore",
+        }
+    }
+
+    /// Parse a stored `event_type` string back into its enum value.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "create" => Some(Self::Create),
+            "modify" => Some(Self::Modify),
+            "delete" => Some(Self::Delete),
+            "restore" => Some(Self::Restore),
+            _ => None,
         }
     }
 }
@@ -105,5 +120,22 @@ mod tests {
             .classify(MAX),
             None
         );
+    }
+
+    #[test]
+    fn event_kind_parse_round_trips() {
+        for kind in [
+            FileEventKind::Create,
+            FileEventKind::Modify,
+            FileEventKind::Delete,
+            FileEventKind::Restore,
+        ] {
+            assert_eq!(FileEventKind::parse(kind.as_str()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn event_kind_parse_rejects_unknown() {
+        assert_eq!(FileEventKind::parse("bogus"), None);
     }
 }

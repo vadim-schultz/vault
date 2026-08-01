@@ -110,3 +110,32 @@ pub async fn wait_for_async(timeout: Duration, mut predicate: impl FnMut() -> bo
     }
     panic!("timed out after {:?}", timeout);
 }
+
+/// Write `content` to `rel` (relative to `worktree`) and commit it via the real
+/// snapshot pipeline (bypassing the watcher's debounce).
+pub fn write_and_commit(worktree: &Path, rel: &str, content: &[u8]) {
+    fs::write(worktree.join(rel), content).expect("write");
+    let layout = vault::domain::VaultLayout::from_worktree(worktree.to_path_buf());
+    vault::watcher::worker::commit_batch(&layout, &[vault::domain::RelPath::parse(rel)])
+        .expect("commit");
+}
+
+/// Overwrite the most recently inserted snapshot's `created_at`, for deterministic
+/// `--at` fixtures. Must be called immediately after `write_and_commit`.
+pub fn backdate_last_snapshot(worktree: &Path, created_at: &str) {
+    use rusqlite::params;
+
+    let db_path = worktree.join(VAULT_DIR).join(META_DB);
+    let conn = rusqlite::Connection::open(db_path).expect("open meta.db");
+    conn.execute(
+        "UPDATE snapshots SET created_at = ?1 WHERE id = (SELECT MAX(id) FROM snapshots)",
+        params![created_at],
+    )
+    .expect("backdate");
+}
+
+/// Convenience: write + commit + backdate in one call.
+pub fn snapshot_at(worktree: &Path, rel: &str, content: &[u8], created_at: &str) {
+    write_and_commit(worktree, rel, content);
+    backdate_last_snapshot(worktree, created_at);
+}
