@@ -43,8 +43,21 @@ Check watcher health:
 ./target/release/vault --help
 ```
 
-`init`, `status`, and `ignore` are implemented. `show`, `restore`, `log`, `diff`, and `list`
-return **not implemented yet** until Chapter 5.
+All subcommands are implemented: `init`, `status`, `ignore`, `show`, `restore`, `log`, `diff`,
+and `list`. See [cli.md](cli.md) for full usage.
+
+## See it all in action
+
+`scripts/showcase.sh` drives every subcommand against a disposable vault — real background
+watcher included — and prints what actually landed in the git object store (`.vault/.git`) and
+the sqlite index (`.vault/meta.db`) after each step:
+
+```bash
+./scripts/showcase.sh
+```
+
+Pass `--pause` to step through it interactively, or `--keep` to leave the vault on disk
+afterwards for manual poking. Requires `git` and `sqlite3` on `PATH`.
 
 ## Local documentation
 

@@ -119,6 +119,36 @@ pub enum VaultError {
     /// JSON serialization failed.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    /// No snapshot exists at or before the requested timestamp.
+    #[error("no snapshot at or before {at}")]
+    NoSnapshotAt {
+        /// The requested timestamp (UTC RFC3339).
+        at: String,
+    },
+
+    /// The path did not exist (or was deleted) in the resolved snapshot.
+    #[error("{path} was not tracked at {at}")]
+    PathNotTrackedAt {
+        /// The requested path.
+        path: String,
+        /// The requested timestamp (UTC RFC3339).
+        at: String,
+    },
+
+    /// `meta.db` contained a value outside the schema's expected domain.
+    #[error("corrupt metadata index: {detail}")]
+    CorruptMetaIndex {
+        /// Human-readable description of the unexpected value.
+        detail: String,
+    },
+
+    /// A `--at`/`--to` value did not match any accepted date format.
+    #[error("invalid date '{input}' (expected YYYY-MM-DD, YYYY-MM-DD HH:MM, or RFC3339)")]
+    InvalidDate {
+        /// The raw input string.
+        input: String,
+    },
 }
 
 impl VaultError {
@@ -148,5 +178,34 @@ mod tests {
             pattern: "[unclosed".to_string(),
         };
         assert!(matches!(err, VaultError::InvalidGlob { .. }));
+    }
+
+    #[test]
+    fn new_variants_construct() {
+        assert!(matches!(
+            VaultError::NoSnapshotAt {
+                at: "2026-01-01".to_string()
+            },
+            VaultError::NoSnapshotAt { .. }
+        ));
+        assert!(matches!(
+            VaultError::PathNotTrackedAt {
+                path: "a.md".to_string(),
+                at: "2026-01-01".to_string()
+            },
+            VaultError::PathNotTrackedAt { .. }
+        ));
+        assert!(matches!(
+            VaultError::CorruptMetaIndex {
+                detail: "unknown event_type".to_string()
+            },
+            VaultError::CorruptMetaIndex { .. }
+        ));
+        assert!(matches!(
+            VaultError::InvalidDate {
+                input: "bad-date".to_string()
+            },
+            VaultError::InvalidDate { .. }
+        ));
     }
 }

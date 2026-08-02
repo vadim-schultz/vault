@@ -17,11 +17,11 @@ Command-line interface for the `vault` binary.
 | `init` | Implemented | 3 |
 | `status` | Implemented | 4 |
 | `ignore PATTERN` | Implemented | 4 |
-| `show PATH --at DATE` | Stub | 5 |
-| `restore PATH --at DATE [--dry-run]` | Stub | 5 |
-| `log [PATH]` | Stub | 5 |
-| `diff PATH [--at DATE] [--to DATE]` | Stub | 5 |
-| `list` | Stub | 5 |
+| `show PATH --at DATE` | Implemented | 5 |
+| `restore PATH --at DATE [--dry-run]` | Implemented | 5 |
+| `log [PATH]` | Implemented | 5 |
+| `diff PATH [--at DATE] [--to DATE]` | Implemented | 5 |
+| `list` | Implemented | 5 |
 
 ### `vault init`
 
@@ -74,7 +74,10 @@ vault show design.md --at "2026-06-01 23:58"
 
 ### `vault restore`
 
-Write an earlier version of a file back to the workspace.
+Write an earlier version of a file back to the workspace. This immediately records its own
+snapshot — tagged `restore` in `vault log`, distinct from an organic edit — rather than waiting
+for the background watcher to notice the write. Restoring to the version that's already current
+is a no-op: nothing is written and no new snapshot is created.
 
 ```bash
 vault restore README.md --at 2026-06-01
@@ -100,19 +103,29 @@ vault log docs/architecture.md
 
 Compare a file between two points in time.
 
+| Flags given | Compares |
+|-------------|----------|
+| neither | last snapshot vs. the working tree |
+| `--at` only | that snapshot vs. the working tree |
+| `--at` and `--to` | one snapshot vs. another |
+
+`--to` without `--at` is a usage error (there's no natural "diff to" without a start point).
+
 ```bash
 vault diff README.md
+vault diff README.md --at 2026-06-01
 vault diff README.md --at 2026-06-01 --to 2026-07-01
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--at DATE` | Start timestamp (optional) |
-| `--to DATE` | End timestamp (optional) |
+| `--to DATE` | End timestamp (optional; requires `--at`) |
 
 ### `vault list`
 
-List tracked files and their latest version timestamp (Chapter 5).
+List tracked files and their latest version timestamp. Files whose most recent event is a
+delete are excluded.
 
 ```bash
 vault list
@@ -126,6 +139,10 @@ MVP accepts explicit timestamps only:
 |--------|---------|
 | `YYYY-MM-DD` | Date; start of day UTC |
 | `YYYY-MM-DD HH:MM` | Date and time; local timezone |
+| RFC3339 (e.g. `2026-06-01T14:32:01+00:00`) | Exact timestamp, any offset |
+
+`vault log` prints exact RFC3339 timestamps, so its output round-trips directly back into
+`--at`/`--to` — copy a line from `vault log` straight into `vault show --at`.
 
 Relative phrases (`2 weeks ago`, `yesterday`) are deferred to post-v0.1.
 

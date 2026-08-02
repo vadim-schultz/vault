@@ -39,7 +39,9 @@ type TreeChangeHandler = fn(
 
 fn tree_handler_for(kind: FileEventKind) -> TreeChangeHandler {
     match kind {
-        FileEventKind::Create | FileEventKind::Modify => upsert_blob_in_tree,
+        FileEventKind::Create | FileEventKind::Modify | FileEventKind::Restore => {
+            upsert_blob_in_tree
+        }
         FileEventKind::Delete => remove_path_from_tree,
     }
 }
@@ -185,6 +187,57 @@ impl GitStore {
             Err(_) => Ok(self.repo.empty_tree().id().detach()),
         }
     }
+
+    /// Read blob content for `path` as it existed in `commit_sha`.
+    ///
+    /// Returns `None` when the commit does not exist or the path is absent from its tree.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError::Git`] when the object database cannot be read.
+    pub fn read_blob_at(
+        &self,
+        commit_sha: &str,
+        path: &crate::domain::RelPath,
+    ) -> Result<Option<Vec<u8>>, VaultError> {
+        let Some(commit_id) = parse_commit_id(commit_sha) else {
+            return Ok(None);
+        };
+        let Some(tree) = self.find_commit_tree(commit_id)? else {
+            return Ok(None);
+        };
+        Self::read_entry(&tree, path)
+    }
+}
+
+fn parse_commit_id(commit_sha: &str) -> Option<gix::ObjectId> {
+    gix::ObjectId::from_hex(commit_sha.as_bytes()).ok()
+}
+
+impl GitStore {
+    fn find_commit_tree(
+        &self,
+        commit_id: gix::ObjectId,
+    ) -> Result<Option<gix::Tree<'_>>, VaultError> {
+        match self.repo.find_commit(commit_id) {
+            Ok(commit) => commit.tree().map(Some).map_err(VaultError::git),
+            Err(_) => Ok(None),
+        }
+    }
+
+    fn read_entry(
+        tree: &gix::Tree<'_>,
+        path: &crate::domain::RelPath,
+    ) -> Result<Option<Vec<u8>>, VaultError> {
+        let Some(entry) = tree
+            .lookup_entry_by_path(path.as_str())
+            .map_err(VaultError::git)?
+        else {
+            return Ok(None);
+        };
+        let object = entry.object().map_err(VaultError::git)?;
+        Ok(Some(object.data.clone()))
+    }
 }
 
 /// Initialize a bare git repository at `git_dir` with external `worktree`.
@@ -259,5 +312,80 @@ mod tests {
             .expect("sha");
         assert!(!sha.is_empty());
         std::env::set_current_dir(restore).expect("restore");
+    }
+
+    #[test]
+    fn read_blob_returns_content_at_commit() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = init_store(&dir);
+
+        std::fs::write(store.worktree().join("a.md"), b"v1").expect("write");
+        let changes1 = vec![FileChange {
+            rel: RelPath::parse("a.md"),
+            kind: FileEventKind::Create,
+        }];
+        let sha1 = store
+            .commit_tree(&changes1, "commit 1")
+            .expect("commit")
+            .expect("sha");
+
+        std::fs::write(store.worktree().join("a.md"), b"v2").expect("write");
+        let changes2 = vec![FileChange {
+            rel: RelPath::parse("a.md"),
+            kind: FileEventKind::Modify,
+        }];
+        let sha2 = store
+            .commit_tree(&changes2, "commit 2")
+            .expect("commit")
+            .expect("sha");
+
+        assert_eq!(
+            store
+                .read_blob_at(&sha1, &RelPath::parse("a.md"))
+                .expect("read1"),
+            Some(b"v1".to_vec())
+        );
+        assert_eq!(
+            store
+                .read_blob_at(&sha2, &RelPath::parse("a.md"))
+                .expect("read2"),
+            Some(b"v2".to_vec())
+        );
+    }
+
+    #[test]
+    fn read_blob_returns_none_for_untracked_path() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = init_store(&dir);
+        std::fs::write(store.worktree().join("a.md"), b"a").expect("write");
+        let changes = vec![FileChange {
+            rel: RelPath::parse("a.md"),
+            kind: FileEventKind::Create,
+        }];
+        let sha = store
+            .commit_tree(&changes, "test")
+            .expect("commit")
+            .expect("sha");
+
+        assert_eq!(
+            store
+                .read_blob_at(&sha, &RelPath::parse("missing.md"))
+                .expect("read"),
+            None
+        );
+    }
+
+    #[test]
+    fn read_blob_returns_none_for_unknown_commit() {
+        let dir = TempDir::new().expect("tempdir");
+        let store = init_store(&dir);
+        let fake_sha = "0".repeat(40);
+
+        assert_eq!(
+            store
+                .read_blob_at(&fake_sha, &RelPath::parse("a.md"))
+                .expect("read"),
+            None
+        );
     }
 }
