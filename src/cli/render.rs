@@ -2,7 +2,10 @@
 
 use std::fmt;
 
+use crate::app::diff::DiffOutcome;
+use crate::app::restore::RestoreOutcome;
 use crate::app::status::{DaemonStatus, StatusReport, VaultStatus};
+use crate::domain::{SnapshotEntry, TrackedFile};
 use crate::ports::ServiceState;
 
 impl fmt::Display for DaemonStatus {
@@ -45,6 +48,78 @@ impl fmt::Display for StatusReport {
         }
         Ok(())
     }
+}
+
+pub fn log_report(entries: &[SnapshotEntry]) -> String {
+    if entries.is_empty() {
+        return "No snapshots yet.\n".to_string();
+    }
+    entries.iter().map(log_line).collect()
+}
+
+fn log_line(entry: &SnapshotEntry) -> String {
+    match &entry.event {
+        Some(event) => format!(
+            "{} {} {}\n",
+            entry.commit_sha.as_str(),
+            entry.created_at,
+            event.as_str()
+        ),
+        None => format!("{} {}\n", entry.commit_sha.as_str(), entry.created_at),
+    }
+}
+
+pub fn list_report(files: &[TrackedFile]) -> String {
+    if files.is_empty() {
+        return "No tracked files.\n".to_string();
+    }
+    files.iter().map(list_line).collect()
+}
+
+fn list_line(file: &TrackedFile) -> String {
+    format!("{}  {}\n", file.path.as_str(), file.last_modified)
+}
+
+pub fn restore_report(path: &std::path::Path, dry_run: bool, outcome: &RestoreOutcome) -> String {
+    if dry_run {
+        return format!("Would restore {} (dry run)", path.display());
+    }
+    match &outcome.commit_sha {
+        Some(sha) => format!(
+            "Restored {} ({} bytes, commit {})",
+            path.display(),
+            outcome.bytes_written,
+            sha.as_str()
+        ),
+        None => format!("{} already matches that version", path.display()),
+    }
+}
+
+pub fn diff_report(outcome: &DiffOutcome) -> String {
+    if outcome.left == outcome.right {
+        return "No differences.\n".to_string();
+    }
+    render_content_diff(outcome)
+}
+
+fn render_content_diff(outcome: &DiffOutcome) -> String {
+    let Some((left_text, right_text)) = as_utf8_pair(outcome.left.as_ref(), outcome.right.as_ref())
+    else {
+        return "Binary files differ.\n".to_string();
+    };
+    similar::TextDiff::from_lines(left_text, right_text)
+        .unified_diff()
+        .header(&outcome.left_label, &outcome.right_label)
+        .to_string()
+}
+
+fn as_utf8_pair<'a>(
+    left: Option<&'a Vec<u8>>,
+    right: Option<&'a Vec<u8>>,
+) -> Option<(&'a str, &'a str)> {
+    let left = std::str::from_utf8(left.map_or(&[][..], Vec::as_slice)).ok()?;
+    let right = std::str::from_utf8(right.map_or(&[][..], Vec::as_slice)).ok()?;
+    Some((left, right))
 }
 
 fn service_state_label(state: ServiceState) -> &'static str {
