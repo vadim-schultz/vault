@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use notify::RecursiveMode;
-use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, NoCache};
+use notify_debouncer_full::{new_debouncer, DebounceEventResult, Debouncer, FileIdMap};
 use tokio::sync::{mpsc, watch};
 
 pub use router::Router;
@@ -49,7 +49,7 @@ pub async fn run(shutdown: watch::Receiver<bool>) -> Result<(), VaultError> {
 fn build_debouncer(
     state: Arc<Mutex<WatcherState>>,
     reload_tx: mpsc::UnboundedSender<()>,
-) -> Result<Debouncer<notify::RecommendedWatcher, NoCache>, VaultError> {
+) -> Result<Debouncer<notify::RecommendedWatcher, FileIdMap>, VaultError> {
     let debounce_ms = min_debounce_ms(&state);
     let handle = tokio::runtime::Handle::current();
     new_debouncer(
@@ -103,7 +103,7 @@ fn external_paths_from_events(events: &[notify_debouncer_full::DebouncedEvent]) 
 async fn run_event_loop(
     mut shutdown: watch::Receiver<bool>,
     state: &Arc<Mutex<WatcherState>>,
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
     mut reload_rx: mpsc::UnboundedReceiver<()>,
 ) -> Result<(), VaultError> {
     loop {
@@ -132,7 +132,7 @@ async fn run_event_loop(
 
 fn refresh_watches_if_registry_changed(
     state: &Arc<Mutex<WatcherState>>,
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
 ) -> Result<(), VaultError> {
     let current = registry_mtime();
     let changed = {
@@ -257,7 +257,7 @@ impl WatcherState {
 
 fn apply_watches(
     state: &Arc<Mutex<WatcherState>>,
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
 ) -> Result<(), VaultError> {
     let (new_roots, removed, register_state) = {
         let mut guard = state.lock().expect("lock");
@@ -276,7 +276,7 @@ fn apply_watches(
 }
 
 fn register_global_state_watches(
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
 ) -> Result<(), VaultError> {
     let state_dir_path = ensure_state_dir()?;
     let registry_file = registry_path()?;
@@ -288,7 +288,7 @@ fn register_global_state_watches(
 }
 
 fn watch_vault_roots(
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
     roots: Vec<PathBuf>,
 ) -> Result<(), VaultError> {
     for root in roots {
@@ -298,7 +298,7 @@ fn watch_vault_roots(
 }
 
 fn watch_path(
-    debouncer: &mut Debouncer<notify::RecommendedWatcher, NoCache>,
+    debouncer: &mut Debouncer<notify::RecommendedWatcher, FileIdMap>,
     path: &std::path::Path,
     mode: RecursiveMode,
 ) -> Result<(), VaultError> {

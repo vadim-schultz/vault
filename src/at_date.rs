@@ -35,7 +35,9 @@ impl AtDate {
         Self::from_calendar_date(input)
             .or_else(|_| Self::from_local_date_time(input))
             .or_else(|_| Self::from_rfc3339(input))
-            .map_err(|_| VaultError::InvalidDate { input: input.to_string() })
+            .map_err(|_| VaultError::InvalidDate {
+                input: input.to_string(),
+            })
     }
 
     /// Parse `YYYY-MM-DD` as UTC midnight.
@@ -43,9 +45,15 @@ impl AtDate {
     /// # Errors
     ///
     /// Returns [`VaultError::InvalidDate`] when `input` isn't a valid calendar date.
+    ///
+    /// # Panics
+    ///
+    /// Never: midnight is a valid time on every calendar date.
     pub fn from_calendar_date(input: &str) -> Result<Self, VaultError> {
-        let date = NaiveDate::parse_from_str(input, DATE_FMT)
-            .map_err(|_| VaultError::InvalidDate { input: input.to_string() })?;
+        let date =
+            NaiveDate::parse_from_str(input, DATE_FMT).map_err(|_| VaultError::InvalidDate {
+                input: input.to_string(),
+            })?;
         let midnight = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
         Ok(Self(Utc.from_utc_datetime(&midnight).to_rfc3339()))
     }
@@ -57,12 +65,18 @@ impl AtDate {
     /// Returns [`VaultError::InvalidDate`] when `input` doesn't match the format or names an
     /// ambiguous/nonexistent local time (DST transition).
     pub fn from_local_date_time(input: &str) -> Result<Self, VaultError> {
-        let naive = NaiveDateTime::parse_from_str(input, DATE_TIME_FMT)
-            .map_err(|_| VaultError::InvalidDate { input: input.to_string() })?;
-        let local = Local
-            .from_local_datetime(&naive)
-            .single()
-            .ok_or_else(|| VaultError::InvalidDate { input: input.to_string() })?;
+        let naive = NaiveDateTime::parse_from_str(input, DATE_TIME_FMT).map_err(|_| {
+            VaultError::InvalidDate {
+                input: input.to_string(),
+            }
+        })?;
+        let local =
+            Local
+                .from_local_datetime(&naive)
+                .single()
+                .ok_or_else(|| VaultError::InvalidDate {
+                    input: input.to_string(),
+                })?;
         Ok(Self(local.with_timezone(&Utc).to_rfc3339()))
     }
 
@@ -72,8 +86,9 @@ impl AtDate {
     ///
     /// Returns [`VaultError::InvalidDate`] when `input` isn't valid RFC3339.
     pub fn from_rfc3339(input: &str) -> Result<Self, VaultError> {
-        let exact = DateTime::parse_from_rfc3339(input)
-            .map_err(|_| VaultError::InvalidDate { input: input.to_string() })?;
+        let exact = DateTime::parse_from_rfc3339(input).map_err(|_| VaultError::InvalidDate {
+            input: input.to_string(),
+        })?;
         Ok(Self(exact.with_timezone(&Utc).to_rfc3339()))
     }
 }
@@ -108,7 +123,9 @@ mod tests {
             .with_timezone(&Utc)
             .to_rfc3339();
         assert_eq!(
-            AtDate::from_local_date_time("2026-06-01 23:58").unwrap().as_str(),
+            AtDate::from_local_date_time("2026-06-01 23:58")
+                .unwrap()
+                .as_str(),
             expected
         );
     }
@@ -128,7 +145,10 @@ mod tests {
 
     #[test]
     fn parse_rejects_garbage() {
-        assert!(matches!(AtDate::parse("not-a-date"), Err(VaultError::InvalidDate { .. })));
+        assert!(matches!(
+            AtDate::parse("not-a-date"),
+            Err(VaultError::InvalidDate { .. })
+        ));
     }
 
     #[test]

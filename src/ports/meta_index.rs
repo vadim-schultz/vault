@@ -104,7 +104,9 @@ pub mod contract {
         assert_eq!(all[1].commit_sha.0, "snap2");
         assert_eq!(all[2].commit_sha.0, "snap1");
 
-        let a_only = index.list_snapshots(Some(&RelPath::parse("a.md"))).expect("list a.md");
+        let a_only = index
+            .list_snapshots(Some(&RelPath::parse("a.md")))
+            .expect("list a.md");
         assert_eq!(a_only.len(), 2);
         assert_eq!(a_only[0].commit_sha.0, "snap3");
         assert_eq!(a_only[0].event, Some(FileEventKind::Modify));

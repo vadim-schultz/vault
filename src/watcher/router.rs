@@ -23,6 +23,17 @@ pub struct WatchedVault {
     pub ignore: IgnoreMatcher,
 }
 
+impl WatchedVault {
+    /// Load a ready vault's layout, config, and ignore matcher from its worktree root.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the vault isn't ready or its config can't be loaded.
+    pub fn load(root: &Path) -> Result<Self, VaultError> {
+        load_vault(root)
+    }
+}
+
 /// Maps absolute paths to vaults (longest root wins).
 #[derive(Debug, Default)]
 pub struct Router {
@@ -72,10 +83,11 @@ impl Router {
     pub fn route(&self, abs_paths: Vec<PathBuf>) -> Vec<(WatchedVault, Vec<RelPath>)> {
         let mut grouped: HashMap<PathBuf, Vec<RelPath>> = HashMap::new();
         for abs in abs_paths {
-            let Some(vault) = self.vault_for(&abs) else {
+            let canonical = abs.canonicalize().unwrap_or(abs);
+            let Some(vault) = self.vault_for(&canonical) else {
                 continue;
             };
-            let Ok(rel) = RelPath::from_worktree(&vault.root, &abs) else {
+            let Ok(rel) = RelPath::from_worktree(&vault.root, &canonical) else {
                 continue;
             };
             if vault.ignore.is_ignored(&rel) {
@@ -94,13 +106,12 @@ impl Router {
             .collect()
     }
 
-    fn vault_for(&self, abs_path: &Path) -> Option<&WatchedVault> {
-        let canonical = abs_path
-            .canonicalize()
-            .unwrap_or_else(|_| abs_path.to_path_buf());
+    /// `canonical_abs_path` must already be canonicalized (or a best-effort fallback) so it
+    /// compares consistently with `vault.root`, which registration always canonicalizes.
+    fn vault_for(&self, canonical_abs_path: &Path) -> Option<&WatchedVault> {
         self.vaults
             .iter()
-            .filter(|vault| canonical.starts_with(&vault.root))
+            .filter(|vault| canonical_abs_path.starts_with(&vault.root))
             .max_by_key(|vault| vault.root.components().count())
     }
 }
@@ -214,7 +225,7 @@ mod tests {
 
         let mut registry = VaultRegistry::default();
         registry.vault.push(crate::registry::VaultEntry {
-            root: dir.path().to_path_buf(),
+            root: dir.path().canonicalize().expect("canonicalize"),
             registered_at: chrono::Utc::now(),
             enabled: true,
         });

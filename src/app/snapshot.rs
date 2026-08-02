@@ -22,7 +22,7 @@ pub fn baseline(
     if changes.is_empty() {
         return Ok(());
     }
-    commit(layout, &changes, clock, object_store, meta_index)?;
+    let _ = commit(layout, &changes, clock, object_store, meta_index)?;
     Ok(())
 }
 
@@ -37,28 +37,44 @@ pub fn commit(
     clock: &dyn Clock,
     object_store: &dyn ObjectStore,
     meta_index: &dyn MetaIndex,
-) -> Result<(), VaultError> {
+) -> Result<Option<crate::domain::CommitSha>, VaultError> {
     if changes.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
     let created_at = clock.now().to_rfc3339();
     let message = snapshot_message(changes, &created_at);
     let Some(commit_sha) = object_store.commit(changes, &message)? else {
-        return Ok(());
+        return Ok(None);
     };
     meta_index.record_snapshot(&crate::domain::SnapshotRecord {
-        commit_sha,
+        commit_sha: commit_sha.clone(),
         created_at,
         changes: changes.to_vec(),
     })?;
-    Ok(())
+    Ok(Some(commit_sha))
 }
 
 fn snapshot_message(changes: &[crate::domain::FileChange], created_at: &str) -> String {
-    if changes.len() == 1 {
-        return format!("vault: update {} @ {created_at}", changes[0].rel.as_str());
+    match changes {
+        [only] => single_change_message(only, created_at),
+        _ => format!("vault: update {} files @ {created_at}", changes.len()),
     }
-    format!("vault: update {} files @ {created_at}", changes.len())
+}
+
+fn single_change_message(change: &crate::domain::FileChange, created_at: &str) -> String {
+    format!(
+        "vault: {} {} @ {created_at}",
+        verb_for(change.kind),
+        change.rel.as_str()
+    )
+}
+
+const fn verb_for(kind: crate::domain::FileEventKind) -> &'static str {
+    match kind {
+        crate::domain::FileEventKind::Create | crate::domain::FileEventKind::Modify => "update",
+        crate::domain::FileEventKind::Delete => "delete",
+        crate::domain::FileEventKind::Restore => "restore",
+    }
 }
 
 #[cfg(test)]
@@ -81,5 +97,13 @@ mod tests {
         commit(&layout, &changes, &clock, &object_store, &meta_index).expect("commit");
         let last = meta_index.last_snapshot_time().expect("time");
         assert_eq!(last, Some("2026-06-01T12:00:00+00:00".to_string()));
+    }
+
+    #[test]
+    fn verb_for_all_kinds() {
+        assert_eq!(verb_for(FileEventKind::Create), "update");
+        assert_eq!(verb_for(FileEventKind::Modify), "update");
+        assert_eq!(verb_for(FileEventKind::Delete), "delete");
+        assert_eq!(verb_for(FileEventKind::Restore), "restore");
     }
 }

@@ -207,14 +207,15 @@ mod tests {
     #[test]
     fn resolve_init_defaults_to_cwd_vault() {
         let dir = TempDir::new().expect("tempdir");
+        let canonical = dir.path().canonicalize().expect("canonicalize");
         let restore = std::env::current_dir().expect("cwd");
         std::env::set_current_dir(dir.path()).expect("chdir");
-        let expected = dir.path().join(VAULT_DIR);
+        let expected = canonical.join(VAULT_DIR);
 
         let layout = resolve_init(None).expect("resolve");
 
         assert_eq!(layout.vault_dir, expected);
-        assert_eq!(layout.worktree, dir.path());
+        assert_eq!(layout.worktree, canonical);
         std::env::set_current_dir(restore).expect("restore cwd");
     }
 

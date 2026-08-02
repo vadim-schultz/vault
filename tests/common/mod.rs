@@ -114,9 +114,9 @@ pub async fn wait_for_async(timeout: Duration, mut predicate: impl FnMut() -> bo
 /// Write `content` to `rel` (relative to `worktree`) and commit it via the real
 /// snapshot pipeline (bypassing the watcher's debounce).
 pub fn write_and_commit(worktree: &Path, rel: &str, content: &[u8]) {
-    fs::write(worktree.join(rel), content).expect("write");
-    let layout = vault::domain::VaultLayout::from_worktree(worktree.to_path_buf());
-    vault::watcher::worker::commit_batch(&layout, &[vault::domain::RelPath::parse(rel)])
+    std::fs::write(worktree.join(rel), content).expect("write");
+    let vault = vault::watcher::router::WatchedVault::load(worktree).expect("load vault");
+    vault::watcher::worker::commit_batch(&vault, &[vault::domain::RelPath::parse(rel)])
         .expect("commit");
 }
 

@@ -24,11 +24,12 @@ pub fn commit_batch(vault: &WatchedVault, rel_paths: &[RelPath]) -> Result<(), V
     }
     let object_store = GixObjectStore::open(&vault.layout)?;
     let meta_index = SqliteMetaIndex::open(vault.layout.meta_db_path())?;
-    snapshot::commit(
+    let _ = snapshot::commit(
         &vault.layout,
         &changes,
         &SystemClock,
         &object_store,
         &meta_index,
-    )
+    )?;
+    Ok(())
 }

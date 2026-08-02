@@ -2,8 +2,8 @@
 
 use std::path::Path;
 
-use crate::domain::{CommitSha, RelPath, SnapshotEntry, SnapshotRecord, TrackedFile};
 use crate::domain::FileEventKind;
+use crate::domain::{CommitSha, RelPath, SnapshotEntry, SnapshotRecord, TrackedFile};
 use crate::error::VaultError;
 use crate::ports::MetaIndex;
 use crate::storage::sqlite::MetaDb;
@@ -48,7 +48,12 @@ impl MetaIndex for SqliteMetaIndex {
     }
 
     fn list_tracked_files(&self) -> Result<Vec<TrackedFile>, VaultError> {
-        self.db.list_tracked_files()?.into_iter().map(to_tracked_file).collect()
+        Ok(self
+            .db
+            .list_tracked_files()?
+            .into_iter()
+            .map(to_tracked_file)
+            .collect())
     }
 }
 
@@ -71,12 +76,12 @@ fn parse_event(event: Option<String>) -> Result<Option<FileEventKind>, VaultErro
         .transpose()
 }
 
-fn to_tracked_file(row: (String, String)) -> Result<TrackedFile, VaultError> {
+fn to_tracked_file(row: (String, String)) -> TrackedFile {
     let (path, last_modified) = row;
-    Ok(TrackedFile {
+    TrackedFile {
         path: RelPath::parse(&path),
         last_modified,
-    })
+    }
 }
 
 #[cfg(test)]

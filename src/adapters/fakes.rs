@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{CommitSha, FileChange, FileEventKind, RelPath, SnapshotEntry, SnapshotRecord, TrackedFile};
+use crate::domain::{
+    CommitSha, FileChange, FileEventKind, RelPath, SnapshotEntry, SnapshotRecord, TrackedFile,
+};
 use crate::error::VaultError;
 use crate::ports::{Clock, MetaIndex, ObjectStore, RegistryStore, ServiceManager, ServiceState};
 use crate::registry::VaultRegistry;
@@ -74,14 +76,14 @@ impl MetaIndex for InMemoryMetaIndex {
         let mut entries: Vec<SnapshotEntry> = records
             .iter()
             .rev()
-            .filter_map(|record| {
-                match path {
-                    None => Some(SnapshotEntry {
-                        commit_sha: record.commit_sha.clone(),
-                        created_at: record.created_at.clone(),
-                        event: None,
-                    }),
-                    Some(p) => record
+            .filter_map(|record| match path {
+                None => Some(SnapshotEntry {
+                    commit_sha: record.commit_sha.clone(),
+                    created_at: record.created_at.clone(),
+                    event: None,
+                }),
+                Some(p) => {
+                    record
                         .changes
                         .iter()
                         .find(|c| c.rel == *p)
@@ -89,7 +91,7 @@ impl MetaIndex for InMemoryMetaIndex {
                             commit_sha: record.commit_sha.clone(),
                             created_at: record.created_at.clone(),
                             event: Some(change.kind),
-                        }),
+                        })
                 }
             })
             .collect();

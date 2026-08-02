@@ -65,11 +65,7 @@ impl ObjectStore for GixObjectStore {
         })
     }
 
-    fn read_blob(
-        &self,
-        commit: &CommitSha,
-        path: &RelPath,
-    ) -> Result<Option<Vec<u8>>, VaultError> {
+    fn read_blob(&self, commit: &CommitSha, path: &RelPath) -> Result<Option<Vec<u8>>, VaultError> {
         self.with_store(|store| store.read_blob_at(commit.as_str(), path))
     }
 }
