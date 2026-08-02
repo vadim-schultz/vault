@@ -26,6 +26,16 @@ cargo build --release
 ./target/release/vault --version
 ```
 
+## See it in action
+
+`scripts/showcase.sh` walks through every subcommand against a disposable vault — real
+background watcher included — printing what actually landed in `.vault/.git` and `.vault/meta.db`
+after each step:
+
+```bash
+./scripts/showcase.sh
+```
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Implementation plans live in [.plans/](.plans/).
