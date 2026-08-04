@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 
 use crate::adapters::TomlRegistry;
-use crate::daemon::{self, DaemonHeartbeat};
+use crate::daemon::{self, DaemonHeartbeat, QueueSnapshot};
 use crate::domain::VaultLayout;
 use crate::error::VaultError;
 use crate::ports::{RegistryStore, ServiceManager, ServiceState};
@@ -38,11 +38,35 @@ pub struct VaultStatus {
     pub root_exists: bool,
 }
 
+/// Background work-queue status from `queue.json`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueStatus {
+    /// When the snapshot was written.
+    pub updated_at: String,
+    /// Pending tasks in FIFO order.
+    pub tasks: Vec<QueueTaskStatus>,
+}
+
+/// One pending task in the queue snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueTaskStatus {
+    /// Task identifier.
+    pub id: u64,
+    /// Stable task kind name.
+    pub kind: String,
+    /// Scheduling lane.
+    pub lane: String,
+    /// Claim attempt count.
+    pub attempts: u32,
+}
+
 /// Full status report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StatusReport {
     /// Daemon subsection.
     pub daemon: DaemonStatus,
+    /// Background work queue, when the daemon has written a snapshot.
+    pub queue: Option<QueueStatus>,
     /// Registered vaults.
     pub vaults: Vec<VaultStatus>,
 }
@@ -58,8 +82,13 @@ pub fn report(
 ) -> Result<StatusReport, VaultError> {
     let registry = registry.load()?;
     let daemon = collect_daemon_status(service);
+    let queue = collect_queue_status();
     let vaults = collect_vault_statuses(&registry)?;
-    Ok(StatusReport { daemon, vaults })
+    Ok(StatusReport {
+        daemon,
+        queue,
+        vaults,
+    })
 }
 
 /// Build a status report using production adapters.
@@ -85,6 +114,29 @@ fn collect_daemon_status(service: &dyn ServiceManager) -> DaemonStatus {
         service_state: service.state(),
         heartbeat_age_secs: heartbeat.as_ref().and_then(heartbeat_age_secs),
         heartbeat,
+    }
+}
+
+fn collect_queue_status() -> Option<QueueStatus> {
+    if !daemon::is_running() {
+        return None;
+    }
+    daemon::read_queue_snapshot().map(queue_status_from_snapshot)
+}
+
+fn queue_status_from_snapshot(snapshot: QueueSnapshot) -> QueueStatus {
+    QueueStatus {
+        updated_at: snapshot.updated_at,
+        tasks: snapshot
+            .tasks
+            .into_iter()
+            .map(|task| QueueTaskStatus {
+                id: task.id,
+                kind: task.kind,
+                lane: task.lane,
+                attempts: task.attempts,
+            })
+            .collect(),
     }
 }
 

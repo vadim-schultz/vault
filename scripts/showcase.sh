@@ -54,6 +54,8 @@ if [[ -z "$VAULT_BIN" ]]; then
     echo "Building release binary..."
     cargo build --release --quiet
     VAULT_BIN="$ROOT/target/release/vault"
+elif [[ "$VAULT_BIN" != /* ]]; then
+    VAULT_BIN="$ROOT/$VAULT_BIN"
 fi
 
 STATE_DIR="$(mktemp -d)"
@@ -101,6 +103,38 @@ inspect_sqlite() {
         "SELECT id, snapshot_id, path, event_type FROM file_events ORDER BY id DESC LIMIT 12;"
 }
 
+inspect_daemon_state() {
+    section "daemon state (VAULT_STATE_DIR)"
+    echo "state dir: $STATE_DIR"
+    if [[ -f "$STATE_DIR/daemon.json" ]]; then
+        echo "-- daemon.json (heartbeat) --"
+        cat "$STATE_DIR/daemon.json"
+    else
+        echo "(no daemon.json yet)"
+    fi
+    echo ""
+    if [[ -f "$STATE_DIR/queue.json" ]]; then
+        echo "-- queue.json (pending background tasks, written every 2s) --"
+        cat "$STATE_DIR/queue.json"
+    else
+        echo "(no queue.json yet — heartbeat has not ticked)"
+    fi
+    echo ""
+    if [[ -f "$STATE_DIR/daemon.log" ]]; then
+        echo "-- daemon.log (last 5 lines) --"
+        tail -n 5 "$STATE_DIR/daemon.log" || true
+    fi
+}
+
+inspect_queue_status() {
+    section "vault status (includes background work queue)"
+    vlt status
+    echo ""
+    echo "The daemon seeds a recurring reconcile_walk per registered vault at startup"
+    echo "(every 10 minutes thereafter). While a task is pending, status lists it as"
+    echo "'Queue: N pending' with id, kind, lane, and attempts — sourced from queue.json."
+}
+
 inspect() {
     inspect_git
     inspect_sqlite
@@ -131,11 +165,32 @@ echo "Hello, Vault!" >notes.md
 vlt init --no-service
 inspect
 
+section "1b. Second vault — two registered roots means two background reconcile tasks"
+mkdir -p nested-vault
+echo "nested copy" >nested-vault/readme.md
+(
+    cd nested-vault
+    vlt init --no-service
+)
+pause
+
 section "2. Start the real background watcher"
 "$VAULT_BIN" daemon --foreground &
 DAEMON_PID=$!
-sleep 1
-vlt status
+sleep 0.2
+echo "polling queue.json for a pending reconcile_walk (runner may drain it quickly)..."
+for _ in $(seq 1 40); do
+    if [[ -f "$STATE_DIR/queue.json" ]] &&
+        grep -q '"kind": "reconcile_walk"' "$STATE_DIR/queue.json" 2>/dev/null; then
+        break
+    fi
+    sleep 0.05
+done
+inspect_queue_status
+inspect_daemon_state
+sleep 2
+echo "after heartbeat tick (queue snapshot may now be empty if work finished):"
+inspect_queue_status
 pause
 
 section "3. Edit notes.md — the watcher auto-commits it"
@@ -158,7 +213,7 @@ echo "draft.md removed from disk -- confirm it drops out of the git tree:"
 inspect
 
 section "5. vault status / vault list"
-vlt status
+inspect_queue_status
 vlt list
 pause
 

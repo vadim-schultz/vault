@@ -3,11 +3,11 @@ name: Optimize — Vault Bottleneck Fixes
 overview: Proposed fixes for every dimension RESULTS.md verdicted "needs limit" or "needs fix", each citing its measured knee point from real runs, not speculation. Drafted as the final artifact of the benchmark plan — this plan itself needs its own review before any implementation begins; nothing here is landed yet.
 todos:
   - id: opt-burst-investigate-and-fix
-    content: "Edit burst silent data loss (dimension 4, highest priority): root-cause why ~16-43% of files vanish above 10k simultaneous creates with zero error (notify/FSEvents coalescing vs. an internal debouncer/channel drop), then either fix the drop or add a detectable failure mode (error, warning, or a periodic reconciliation re-walk) so it's never silent"
+    content: "Edit burst silent data loss (dimension 4, highest priority): root-cause why ~16-43% of files vanish above 10k simultaneous creates with zero error (notify/FSEvents coalescing vs. an internal debouncer/channel drop), then either fix the drop or add a detectable failure mode (error, warning, or a periodic reconciliation re-walk) so it's never silent — **partial:** periodic `reconcile_walk` safety net landed via work queue (see `.plans/queue/README.md`); root-cause investigation still open"
     status: pending
   - id: opt-history-index
     content: "History depth (dimension 1): add an index on snapshots(created_at) (or a covering index matching SELECT_COMMIT_AT_OR_BEFORE's ORDER BY), and fix SELECT_TRACKED_FILES's correlated subquery to scale with distinct paths rather than total file_events rows"
-    status: pending
+    status: completed
   - id: opt-repo-gc
     content: "Repo growth / no GC (dimension 6): add a repack/gc step (on an explicit vault command, a periodic daemon task, or both) to bound the ~10KB-per-commit loose-object overhead measured at 20k commits (200MB for <2MB of real content)"
     status: pending
@@ -80,6 +80,11 @@ warnings anywhere (daemon log, `vault status`) when it happens (`RESULTS.md` § 
   pass that walks tracked watch roots and diffs against `list_tracked_files`, so a future regression
   in this area produces a visible "N files untracked" signal instead of silent loss. This is
   cheap insurance even after the root cause is fixed.
+
+  **Partially landed (2026-08-04):** daemon work queue runs `reconcile_walk` every 10 minutes per
+  registered vault and logs mismatches to `daemon.log` — see `.plans/queue/README.md`. Still
+  missing: root-cause fix for the burst drop itself, and on-demand reconciliation via
+  `vault status` (only daemon log today).
 
 **Verification:** re-run `scripts/stress/edit_burst.sh` at 10k/15k/20k; target 0% loss at all
 three, or, if the OS backend itself has a hard ceiling that can't be fully closed, a clearly

@@ -3,11 +3,13 @@
 pub mod clock;
 pub mod meta_index;
 pub mod object_store;
+pub mod queue;
 pub mod registry;
 pub mod service;
 
 pub use clock::Clock;
 pub use meta_index::MetaIndex;
 pub use object_store::ObjectStore;
+pub use queue::{FailOutcome, QueueStore, DEFAULT_LANE};
 pub use registry::RegistryStore;
 pub use service::{ServiceManager, ServiceState};

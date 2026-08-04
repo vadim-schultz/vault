@@ -12,10 +12,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::adapters::TomlRegistry;
+use crate::adapters::{InMemoryQueueStore, TomlRegistry};
 use crate::app::prune;
+use crate::domain::{QueuedTask, TaskKind};
 use crate::error::VaultError;
-use crate::paths::{daemon_heartbeat_path, daemon_lock_path, daemon_log_path};
+use crate::paths::{daemon_heartbeat_path, daemon_lock_path, daemon_log_path, daemon_queue_path};
+use crate::queue::WorkQueue;
 use crate::registry::VaultRegistry;
 use crate::watcher;
 
@@ -32,6 +34,28 @@ pub struct DaemonHeartbeat {
     pub vault_count: usize,
     /// Vault binary version.
     pub version: String,
+}
+
+/// Daemon work-queue snapshot written to `queue.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueSnapshot {
+    /// When the snapshot was written.
+    pub updated_at: String,
+    /// Pending tasks in FIFO order.
+    pub tasks: Vec<QueueTaskSnapshot>,
+}
+
+/// One pending task in a queue snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueueTaskSnapshot {
+    /// Task identifier.
+    pub id: u64,
+    /// Stable task kind name.
+    pub kind: String,
+    /// Scheduling lane.
+    pub lane: String,
+    /// Claim attempt count.
+    pub attempts: u32,
 }
 
 /// Guard holding the daemon advisory lock for the process lifetime.
@@ -100,24 +124,41 @@ pub async fn run_foreground() -> Result<(), VaultError> {
     let guard = Arc::new(DaemonGuard::acquire()?);
     append_log("vault daemon started")?;
 
+    let store = Arc::new(InMemoryQueueStore::new());
+    let queue = Arc::new(WorkQueue::new(store));
+    seed_reconcile_tasks(&queue)?;
+
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_task = spawn_shutdown_listener(shutdown_tx);
-    let heartbeat_task = spawn_heartbeat_task(Arc::clone(&guard));
+    let heartbeat_task = spawn_heartbeat_task(Arc::clone(&guard), Arc::clone(&queue));
+    let runner_task = crate::queue::spawn_runner(Arc::clone(&queue));
 
     let watcher_result = watcher::run(shutdown_rx).await;
 
     shutdown_task.abort();
     heartbeat_task.abort();
+    runner_task.abort();
     drop(guard);
     append_log("vault daemon stopped")?;
     watcher_result
 }
 
-fn spawn_heartbeat_task(guard: Arc<DaemonGuard>) -> JoinHandle<()> {
+fn seed_reconcile_tasks(queue: &WorkQueue) -> Result<(), VaultError> {
+    let registry = VaultRegistry::load()?;
+    for entry in &registry.vault {
+        if entry.enabled && entry.root.is_dir() {
+            let _ = queue.enqueue(TaskKind::reconcile_walk(entry.root.clone()))?;
+        }
+    }
+    Ok(())
+}
+
+fn spawn_heartbeat_task(guard: Arc<DaemonGuard>, queue: Arc<WorkQueue>) -> JoinHandle<()> {
     tokio::spawn(async move {
         loop {
             let count = VaultRegistry::load().map_or(0, |r| r.vault.len());
             let _ = guard.heartbeat(count);
+            let _ = write_queue_snapshot(&queue);
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     })
@@ -179,6 +220,40 @@ fn write_heartbeat(started_at: &str, vault_count: usize) -> Result<(), VaultErro
     Ok(())
 }
 
+fn write_queue_snapshot(queue: &WorkQueue) -> Result<(), VaultError> {
+    let tasks = queue
+        .snapshot()?
+        .into_iter()
+        .map(queue_task_snapshot)
+        .collect();
+    let snapshot = QueueSnapshot {
+        updated_at: Utc::now().to_rfc3339(),
+        tasks,
+    };
+    let path = daemon_queue_path()?;
+    ensure_parent_dir(&path)?;
+    let contents = serde_json::to_string_pretty(&snapshot)?;
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+fn queue_task_snapshot(task: QueuedTask) -> QueueTaskSnapshot {
+    QueueTaskSnapshot {
+        id: task.id.as_u64(),
+        kind: task.kind.name().to_string(),
+        lane: task.lane,
+        attempts: task.attempts,
+    }
+}
+
+/// Read the current queue snapshot, if present.
+#[must_use]
+pub fn read_queue_snapshot() -> Option<QueueSnapshot> {
+    let path = daemon_queue_path().ok()?;
+    let contents = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
 /// Append a line to `daemon.log`.
 ///
 /// # Errors
@@ -232,6 +307,23 @@ mod tests {
         let beat = read_heartbeat().expect("read");
         assert_eq!(beat.vault_count, 2);
         assert_eq!(beat.version, env!("CARGO_PKG_VERSION"));
+        std::env::remove_var(crate::paths::STATE_DIR_ENV);
+    }
+
+    #[test]
+    fn queue_snapshot_roundtrip() {
+        let _guard = crate::paths::STATE_ENV_LOCK.lock().expect("lock");
+        let dir = TempDir::new().expect("tempdir");
+        std::env::set_var(crate::paths::STATE_DIR_ENV, dir.path());
+        let store = std::sync::Arc::new(crate::adapters::InMemoryQueueStore::new());
+        let queue = crate::queue::WorkQueue::new(store);
+        let _ = queue.enqueue(crate::domain::TaskKind::reconcile_walk_once(
+            std::path::PathBuf::from("/tmp/vault"),
+        ));
+        write_queue_snapshot(&queue).expect("write");
+        let snap = read_queue_snapshot().expect("read");
+        assert_eq!(snap.tasks.len(), 1);
+        assert_eq!(snap.tasks[0].kind, "reconcile_walk");
         std::env::remove_var(crate::paths::STATE_DIR_ENV);
     }
 }

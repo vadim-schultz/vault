@@ -149,6 +149,13 @@ pub enum VaultError {
         /// The raw input string.
         input: String,
     },
+
+    /// A queued background task was not found.
+    #[error("queued task not found: {id}")]
+    TaskNotFound {
+        /// Task identifier.
+        id: u64,
+    },
 }
 
 impl VaultError {
