@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Dimension 6: repo growth with no GC. Loose objects accumulate in .vault/.git/objects forever
-# — there is no git gc/repack anywhere in the codebase. This simulates years of daily edits to
-# one file (compressed into seconds via examples/simulate_history, bypassing the daemon's
-# debounce entirely) and tracks object count, disk usage, and real CLI latency as it grows.
+# Dimension 6: repo growth — loose objects accumulate until housekeeping repacks.
+# Uses examples/simulate_history for commits and examples/run_housekeeping to trigger repack
+# at each milestone without a live daemon.
 set -euo pipefail
 STRESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$STRESS_DIR/lib.sh"
@@ -19,7 +18,7 @@ new_stress_vault "$WORKDIR"
 MILESTONES=(100 1000 5000 20000)
 prev=0
 
-echo "total_commits,object_count,git_dir_kb,show_latency_ms,log_latency_ms,status_latency_ms"
+echo "total_commits,object_count,git_dir_kb,show_latency_ms,log_latency_ms,status_latency_ms,loose_after_hk,packs_after_hk,repack_ran"
 
 for target in "${MILESTONES[@]}"; do
     delta=$((target - prev))
@@ -46,5 +45,10 @@ for target in "${MILESTONES[@]}"; do
     (cd "$WORKDIR" && "$VAULT_BIN" status >/dev/null)
     status_ms=$(( $(now_ms) - start ))
 
-    echo "$target,$objs,$size_kb,$show_ms,$log_ms,$status_ms"
+    hk_line=$(cd "$REPO_ROOT" && cargo run --quiet --release --example run_housekeeping -- "$WORKDIR")
+    loose_after=$(echo "$hk_line" | sed -n 's/.*loose_after=\([0-9]*\).*/\1/p')
+    packs_after=$(echo "$hk_line" | sed -n 's/.*packs_after=\([0-9]*\).*/\1/p')
+    repack_ran=$(echo "$hk_line" | sed -n 's/.*repack_ran=\([a-z]*\).*/\1/p')
+
+    echo "$target,$objs,$size_kb,$show_ms,$log_ms,$status_ms,$loose_after,$packs_after,$repack_ran"
 done

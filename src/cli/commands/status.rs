@@ -4,7 +4,9 @@ use std::fmt;
 
 use anyhow::Result;
 
-use crate::app::status::{self, DaemonStatus, QueueStatus, StatusReport, VaultStatus};
+use crate::app::status::{
+    self, DaemonStatus, QueueStatus, StatusReport, VaultHousekeepingStatus, VaultStatus,
+};
 use crate::cli::support::run_blocking;
 use crate::ports::ServiceState;
 
@@ -38,11 +40,49 @@ impl fmt::Display for VaultStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let snapshot = self.last_snapshot.as_deref().unwrap_or("never");
         let state = if self.root_exists { "ok" } else { "missing" };
-        write!(
+        writeln!(
             f,
             "  {} [{state}] last snapshot: {snapshot}",
             self.root.display()
-        )
+        )?;
+        if let Some(housekeeping) = &self.housekeeping {
+            write!(f, "    housekeeping: {housekeeping}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for VaultHousekeepingStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} loose objects, {} pack",
+            self.counts.loose, self.counts.packs
+        )?;
+        match &self.last_repack {
+            Some(record) => {
+                let reclaimed = record.bytes_before.saturating_sub(record.bytes_after);
+                write!(
+                    f,
+                    " (last repack {}: packed {} objects, reclaimed ~{})",
+                    record.ran_at,
+                    record.objects_packed,
+                    format_bytes(reclaimed)
+                )
+            }
+            None => write!(f, " (never repacked)"),
+        }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    if bytes >= MIB {
+        format!("{} MB", bytes / MIB)
+    } else if bytes >= 1024 {
+        format!("{} KB", bytes / 1024)
+    } else {
+        format!("{bytes} B")
     }
 }
 

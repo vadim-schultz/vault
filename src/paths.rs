@@ -20,6 +20,9 @@ pub const GIT_DIR: &str = ".git";
 /// Recovery guide filename inside `.vault/`.
 pub const README_FILE: &str = "README";
 
+/// Housekeeping marker JSON inside `.vault/`.
+pub const HOUSEKEEPING_FILE: &str = "housekeeping.json";
+
 /// Environment variable overriding the global state directory.
 pub const STATE_DIR_ENV: &str = "VAULT_STATE_DIR";
 

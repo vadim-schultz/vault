@@ -8,4 +8,4 @@ Background task queue for long-running daemon work — enqueue and return immedi
 
 **Code:** `src/domain/queue.rs`, `src/ports/queue.rs`, `src/adapters/queue.rs`, `src/queue/`, `benches/queue_latency.rs`.
 
-**Landed (2026-08-04):** FIFO `QueueStore` port + `InMemoryQueueStore`, `WorkQueue` orchestrator, daemon runner with self-rescheduling recurring tasks, `reconcile_walk` safety net (dimension 4 partial), `vault status` queue snapshot via `queue.json`.
+**Landed (2026-08-04):** FIFO `QueueStore` port + `InMemoryQueueStore`, `WorkQueue` orchestrator, daemon runner with self-rescheduling recurring tasks, `reconcile_walk` safety net (dimension 4 partial), `git_housekeeping` conditional repack (dimension 6), `vault status` queue snapshot via `queue.json`.

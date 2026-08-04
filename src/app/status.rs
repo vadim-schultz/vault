@@ -10,7 +10,7 @@ use crate::domain::VaultLayout;
 use crate::error::VaultError;
 use crate::ports::{RegistryStore, ServiceManager, ServiceState};
 use crate::registry::{VaultEntry, VaultRegistry};
-use crate::storage::sqlite;
+use crate::storage::housekeeping::{self, RepackRecord};
 
 /// Overall daemon status for display.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,15 @@ pub struct DaemonStatus {
     pub heartbeat_age_secs: Option<i64>,
 }
 
+/// Per-vault git housekeeping status for display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultHousekeepingStatus {
+    /// Live loose/pack counts from the object store.
+    pub counts: housekeeping::ObjectCounts,
+    /// Last repack record from `.vault/housekeeping.json`, if any.
+    pub last_repack: Option<RepackRecord>,
+}
+
 /// Per-vault status line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VaultStatus {
@@ -36,6 +45,8 @@ pub struct VaultStatus {
     pub last_snapshot: Option<String>,
     /// Whether the vault root still exists.
     pub root_exists: bool,
+    /// Git housekeeping counts and last-repack history.
+    pub housekeeping: Option<VaultHousekeepingStatus>,
 }
 
 /// Background work-queue status from `queue.json`.
@@ -156,18 +167,28 @@ fn collect_vault_statuses(registry: &VaultRegistry) -> Result<Vec<VaultStatus>, 
 
 fn vault_status_for_entry(entry: &VaultEntry) -> Result<VaultStatus, VaultError> {
     let layout = VaultLayout::from_worktree(entry.root.clone());
+    let housekeeping = if entry.root.is_dir() && layout.meta_db_path().is_file() {
+        let status = housekeeping::status_for(&layout)?;
+        Some(VaultHousekeepingStatus {
+            counts: status.counts,
+            last_repack: status.last_repack,
+        })
+    } else {
+        None
+    };
     Ok(VaultStatus {
         root: entry.root.clone(),
         registered_at: entry.registered_at.to_rfc3339(),
         last_snapshot: last_snapshot_for(&layout)?,
         root_exists: entry.root.is_dir(),
+        housekeeping,
     })
 }
 
 fn last_snapshot_for(layout: &VaultLayout) -> Result<Option<String>, VaultError> {
     let meta_db = layout.meta_db_path();
     if meta_db.is_file() {
-        sqlite::last_snapshot_time(&meta_db)
+        crate::storage::sqlite::last_snapshot_time(&meta_db)
     } else {
         Ok(None)
     }

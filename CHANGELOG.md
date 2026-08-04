@@ -4,9 +4,17 @@
 
 ### Fixed
 
+* Repo growth no longer unbounded — daemon `git_housekeeping` task repacks when `[gc]` loose-object, pack-file, or max-age thresholds are exceeded; `vault status` shows live counts and last-repack summary.
 * `resolve_at` (`show`/`diff`/`restore`) and `list_tracked_files` (`vault list`) no longer degrade linearly with total snapshot count — added `idx_snapshots_created_at` and rewrote `SELECT_TRACKED_FILES` to aggregate by path first; legacy `meta.db` files migrate on open.
 
 ### Added
+
+* `[gc]` config section — `loose_object_limit` (default 6700), `pack_limit` (50), `max_age_secs` (7 days).
+* `git_housekeeping` background task — checks thresholds every 15 minutes per vault; repacks via git2 `PackBuilder` (vendored libgit2, no transport features).
+* `.vault/housekeeping.json` marker — last check time, live counts, and last-repack stats.
+* `examples/run_housekeeping.rs` — one-shot housekeeping for stress scripts.
+* `benches/housekeeping.rs` — `count_objects` and `repack` cost at 100–50k objects.
+* `git2` dependency (housekeeping module only; gix remains the read/write object store).
 
 * Background work queue in the daemon — swappable `QueueStore` port, FIFO `InMemoryQueueStore`, `WorkQueue` orchestrator, and a background runner. Long tasks enqueue and return immediately; recurring tasks self-reschedule via `TaskKind::interval`.
 * `reconcile_walk` task — periodic safety net (every 10 min per vault) that diffs disk against `list_tracked_files` and logs mismatches to `daemon.log` (partial fix for edit-burst silent data loss; root cause still open).
