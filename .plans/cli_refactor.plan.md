@@ -13,35 +13,42 @@ overview: Split src/cli/mod.rs (293 lines) and src/cli/render.rs (150 lines) —
 todos:
   - id: cli-context
     content: "Add src/cli/context.rs — the ONLY file under cli/ allowed to name concrete adapter types. Stores { object_store: GixObjectStore, meta_index: SqliteMetaIndex } with Stores::open(&VaultLayout) -> Result<Self, VaultError>, replacing five separate inline GixObjectStore::open + SqliteMetaIndex::open call sites. SystemClock does NOT live on Stores (see cli-clock-location) — it's a separate, narrower seam since only restore needs it"
-    status: pending
+    status: complete
   - id: cli-clock-location
     content: "Decided: SystemClock does not belong on Stores conceptually (only restore needs a clock; bundling it would make every other command pay conceptual weight for a dependency it doesn't use). Add a separate context::clock() -> SystemClock free function (or a one-line `SystemClock` construction directly in commands/restore.rs, since it's a zero-sized unit struct with no setup) instead of a Stores.clock field"
-    status: pending
+    status: complete
   - id: cli-support
     content: "Add src/cli/support.rs — adapter-agnostic marshalling helpers shared across commands: run_blocking(), rel_path_from_cli(), and a Global { vault_path, verbose } struct built once in dispatch() and passed to each command's run()"
-    status: pending
+    status: complete
   - id: cli-commands-dir
     content: "Create src/cli/commands/{mod,init,show,restore,log,diff,status,list,ignore,daemon}.rs. Each file owns: its own clap::Args struct (where the command takes args), its async run(&Global, Args) fn (parse -> Stores::open -> call app::<cmd>::run -> render), and any output-formatting fn specific to that command"
-    status: pending
+    status: complete
   - id: cli-render-split
     content: "Delete src/cli/render.rs. Move log_report/list_report/restore_report to their respective command files (each is single-use). Move diff_report + render_content_diff + as_utf8_pair into commands/diff.rs (also single-use). Move the Display impls for DaemonStatus/VaultStatus/StatusReport into commands/status.rs, next to the only command that renders them"
-    status: pending
+    status: complete
   - id: cli-mod-thin
     content: "Rewrite src/cli/mod.rs down to: Cli struct (global flags + subcommand), Command enum (each variant wraps that command's Args type from commands::<name>), run(), and dispatch() — one match arm per command, each a single delegating call. No adapter imports, no bail!/validation logic, no rendering left in this file"
-    status: pending
+    status: complete
   - id: cli-diff-validation-decision
     content: "Decided: switch to clap's declarative #[arg(long, requires = \"at\")] on DiffArgs.to (removes the imperative bail!\"--to requires --at\" from commands::diff::run entirely). Update tests/diff.rs's stderr predicate from contains(\"--to requires --at\") to clap's actual generated text: \"the following required arguments were not provided:\" / \"--at <AT>\" (confirmed by temporarily building with the attribute — exit code 2, same as the current bail! path)"
-    status: pending
+    status: complete
   - id: cli-tests-unchanged
     content: "Keep the #[cfg(test)] mod tests in cli/mod.rs (version_matches_cargo_toml, help_lists_subcommands, vault_path_help_does_not_promise_discovery) passing unmodified against the new Cli/Command shape. All output strings byte-identical and tests/{show,restore,log,list,status,init,cli_version}.rs need no changes; tests/diff.rs is the sole exception — update its '--to requires --at' predicate per cli-diff-validation-decision"
-    status: pending
+    status: complete
   - id: cli-arch-doc-sync
     content: "Update architecture.plan.md's module tree entry for cli/ (currently just mod.rs + render.rs) to reflect context.rs, support.rs, commands/*.rs, and mark the Composition root section's cli::context::build_app_context suggestion as now implemented as cli::context::Stores::open"
-    status: pending
+    status: complete
 isProject: false
 ---
 
 # CLI module split
+
+**Status: implemented** on `feat/cli-refactor`. Both decisions from review landed as planned:
+`--to` cross-flag validation moved to clap's declarative `requires`, and `SystemClock` got its
+own `context::clock()` accessor rather than a field on `Stores`. `cargo build`, `cargo test`
+(all 77 unit tests + every integration test file), and `cargo clippy -- -D warnings` (the repo's
+actual CI gate) all pass; `tests/diff.rs` is the one test file with an intentional text change,
+per the "Decisions" section below.
 
 ## Problem
 

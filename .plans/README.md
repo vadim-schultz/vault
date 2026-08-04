@@ -11,7 +11,7 @@ Chapter-based bootstrap plans for the Vault document version manager. Update the
 | [chapter_4.plan.md](chapter_4.plan.md) | Singleton background watcher — registry, daemon, snapshots |
 | [architecture.plan.md](architecture.plan.md) | Ports-and-adapters refactor — layered crate layout |
 | [chapter_5.plan.md](chapter_5.plan.md) | Time-travel read commands — show/log/diff/restore/list, gix blob reads, CLI date parsing |
-| [cli_refactor.plan.md](cli_refactor.plan.md) | Split src/cli/mod.rs + render.rs into one file per command, fix adapter-import leakage into a single composition-root seam — draft, pending review |
+| [cli_refactor.plan.md](cli_refactor.plan.md) | Split src/cli/mod.rs + render.rs into one file per command, fix adapter-import leakage into a single composition-root seam — complete |
 
 ## Chapter status
 

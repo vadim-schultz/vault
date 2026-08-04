@@ -55,8 +55,13 @@ src/
 │   ├── prune.rs         # PruneRegistry
 │   └── add_ignore.rs    # AddIgnore
 ├── cli/
-│   ├── mod.rs           # clap Parser + dispatch
-│   └── render.rs        # Display formatting
+│   ├── mod.rs           # Cli/Command clap defs, dispatch() — marshalling only
+│   ├── context.rs       # Stores::open() — the one file allowed to name concrete adapters
+│   ├── support.rs       # run_blocking(), rel_path_from_cli(), Global{vault_path,verbose}
+│   └── commands/
+│       ├── mod.rs        # pub mod declarations only
+│       ├── init.rs, show.rs, restore.rs, log.rs, diff.rs,
+│       └── status.rs, list.rs, ignore.rs, daemon.rs  # one file per subcommand: Args + run() + render
 ├── daemon.rs            # singleton lock, heartbeat, run_foreground
 ├── watcher/
 │   ├── mod.rs
@@ -122,7 +127,8 @@ Fakes live in `adapters/fakes/` behind `#[cfg(any(test, feature = "testing"))]`.
 
 ## Composition root
 
-`bin/vault.rs` (or `cli::context::build_app_context`) wires concrete adapters:
+`bin/vault.rs` (via `cli::context::Stores::open` and `cli::context::clock`, implemented in
+[cli_refactor.plan.md](cli_refactor.plan.md)) wires concrete adapters:
 
 ```rust
 let clock = Arc::new(SystemClock);

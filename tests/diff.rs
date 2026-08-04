@@ -65,5 +65,8 @@ fn diff_to_without_at_is_a_usage_error() {
         .args(["diff", "doc.md", "--to", "2026-06-02"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("--to requires --at"));
+        .stderr(predicates::str::contains(
+            "the following required arguments were not provided",
+        ))
+        .stderr(predicates::str::contains("--at <AT>"));
 }
