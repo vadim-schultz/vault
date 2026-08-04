@@ -8,8 +8,19 @@ pub const CONNECTION_PRAGMAS: &str =
 pub const COUNT_SNAPSHOTS_TABLE: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'";
 
-/// Schema applied on `vault init`.
-pub const SCHEMA: &str = "
+/// Return 1 when an index with the given name exists.
+pub const COUNT_INDEX_BY_NAME: &str =
+    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1";
+
+/// Index matching ``file_events(path, snapshot_id)``.
+pub const IDX_FILE_EVENTS_PATH_TIME: &str = "idx_file_events_path_time";
+
+/// Index matching ``snapshots(created_at DESC, id DESC)``.
+pub const IDX_SNAPSHOTS_CREATED_AT: &str = "idx_snapshots_created_at";
+
+macro_rules! schema_tables {
+    () => {
+        "
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY,
     commit_sha TEXT NOT NULL,
@@ -22,9 +33,26 @@ CREATE TABLE file_events (
     event_type TEXT NOT NULL,
     UNIQUE(snapshot_id, path)
 );
-CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
-CREATE INDEX idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);
-";
+"
+    };
+}
+
+/// Schema as applied before ``idx_snapshots_created_at`` existed.
+#[cfg(test)]
+pub const LEGACY_SCHEMA: &str = concat!(
+    schema_tables!(),
+    "CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+",
+);
+
+/// Schema applied on `vault init`.
+pub const SCHEMA: &str = concat!(
+    schema_tables!(),
+    "CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+",
+    "CREATE INDEX idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);
+",
+);
 
 /// Idempotent migration applied on every `meta.db` open for vaults created before the index existed.
 pub const ENSURE_SNAPSHOTS_CREATED_AT_INDEX: &str =

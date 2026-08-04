@@ -8,6 +8,9 @@ use std::path::Path;
 use rusqlite::Connection;
 use tempfile::TempDir;
 use vault::paths::{CONFIG_FILE, GIT_DIR, META_DB, VAULT_DIR};
+use vault::storage::sqlite::{
+    COUNT_INDEX_BY_NAME, IDX_FILE_EVENTS_PATH_TIME, IDX_SNAPSHOTS_CREATED_AT,
+};
 
 #[test]
 fn init_creates_vault_layout() {
@@ -103,17 +106,13 @@ fn assert_schema(db_path: &Path) {
     assert!(names.contains(&"snapshots".to_string()));
     assert!(names.contains(&"file_events".to_string()));
 
-    assert_index_exists(&conn, "idx_file_events_path_time");
-    assert_index_exists(&conn, "idx_snapshots_created_at");
+    assert_index_exists(&conn, IDX_FILE_EVENTS_PATH_TIME);
+    assert_index_exists(&conn, IDX_SNAPSHOTS_CREATED_AT);
 }
 
 fn assert_index_exists(conn: &Connection, name: &str) {
     let index_count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
-            [name],
-            |row| row.get(0),
-        )
+        .query_row(COUNT_INDEX_BY_NAME, [name], |row| row.get(0))
         .expect("query index");
     assert_eq!(index_count, 1, "expected index {name}");
 }

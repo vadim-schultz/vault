@@ -10,7 +10,9 @@ use rusqlite::{params, Connection};
 use crate::domain::SnapshotRecord;
 use crate::error::VaultError;
 
-pub use queries::SCHEMA;
+pub use queries::{
+    COUNT_INDEX_BY_NAME, IDX_FILE_EVENTS_PATH_TIME, IDX_SNAPSHOTS_CREATED_AT, SCHEMA,
+};
 
 /// `SQLite` metadata index with a held connection.
 pub struct MetaDb {
@@ -321,14 +323,7 @@ mod tests {
         let db = MetaDb::open(file.path()).expect("init");
 
         let conn = db.conn.lock().expect("lock");
-        let index_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_snapshots_created_at'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("query index");
-        assert_eq!(index_count, 1);
+        assert_index_exists(&conn, queries::IDX_SNAPSHOTS_CREATED_AT);
     }
 
     #[test]
@@ -338,36 +333,20 @@ mod tests {
             let conn = Connection::open(file.path()).expect("open legacy db");
             conn.execute_batch(queries::CONNECTION_PRAGMAS)
                 .expect("pragmas");
-            conn.execute_batch(
-                "
-CREATE TABLE snapshots (
-    id INTEGER PRIMARY KEY,
-    commit_sha TEXT NOT NULL,
-    created_at TEXT NOT NULL
-);
-CREATE TABLE file_events (
-    id INTEGER PRIMARY KEY,
-    snapshot_id INTEGER REFERENCES snapshots(id),
-    path TEXT NOT NULL,
-    event_type TEXT NOT NULL,
-    UNIQUE(snapshot_id, path)
-);
-CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
-",
-            )
-            .expect("legacy schema");
+            conn.execute_batch(queries::LEGACY_SCHEMA)
+                .expect("legacy schema");
         }
 
         let db = MetaDb::open(file.path()).expect("migrate on open");
         let conn = db.conn.lock().expect("lock");
+        assert_index_exists(&conn, queries::IDX_SNAPSHOTS_CREATED_AT);
+    }
+
+    fn assert_index_exists(conn: &Connection, name: &str) {
         let index_count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_snapshots_created_at'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row(queries::COUNT_INDEX_BY_NAME, [name], |row| row.get(0))
             .expect("query index");
-        assert_eq!(index_count, 1);
+        assert_eq!(index_count, 1, "expected index {name}");
     }
 
     #[test]
