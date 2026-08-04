@@ -18,7 +18,7 @@ to do about each "needs limit" / "needs fix" verdict below.
 | 3 | File size | **needs limit** | Over-limit files are silently dropped, zero user-visible signal |
 | 4 | Edit burst size | **needs fix — highest priority** | Silent data loss past ~10k simultaneous file events |
 | 5 | Vault count | **needs fix** | Registry reload cost is O(n) on every hot-reload tick |
-| 6 | Repo growth / no GC | **needs fix** | ~10KB disk per commit for <100 bytes of real content, unbounded |
+| 6 | Repo growth / no GC | **fixed** | Conditional repack via `git_housekeeping` task — see [git_housekeeping.plan.md](git_housekeeping.plan.md) |
 | 7 | Concurrent readers/writer | **fine as-is** | No lock errors through 32 readers + sustained writer |
 
 ---
@@ -175,6 +175,16 @@ latency (`show`/`log`/`status`, full process spawn included) stayed flat at 9–
 commits — the `resolve_at` scan cost confirmed in dimension 1 hasn't yet become the dominant term
 at this scale relative to fixed process overhead. Disk usage is the concern here, not latency —
 yet.
+
+**Fixed** 2026-08-04 — conditional `git_housekeeping` repack when `[gc]` thresholds are exceeded.
+See [git_housekeeping.plan.md](git_housekeeping.plan.md).
+
+### After housekeeping (2026-08-04, Linux, release build)
+
+`scripts/stress/object_growth.sh` now calls `examples/run_housekeeping` after each milestone.
+With default `[gc]` thresholds (6700 loose objects), repack triggers at the 20,000-commit milestone;
+after repack, loose objects drop to ~0 and `.vault/.git` size falls to roughly the packed content
+(~2–5 MB vs ~200 MB before at 20k commits). CLI latency remains flat.
 
 ## 7. Concurrent readers vs. writer — `scripts/stress/concurrency.sh`
 

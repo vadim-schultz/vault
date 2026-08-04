@@ -34,10 +34,18 @@ pub enum TaskKind {
         /// Re-enqueue this often after this run finishes; `None` = run once.
         interval: Option<Duration>,
     },
+    /// Check git housekeeping thresholds and repack when due.
+    GitHousekeeping {
+        /// Vault worktree root.
+        vault_root: PathBuf,
+        /// Re-enqueue this often after this run finishes; `None` = run once.
+        interval: Option<Duration>,
+    },
 }
 
 impl TaskKind {
     const RECONCILE_WALK_INTERVAL: Duration = Duration::from_secs(600);
+    const GIT_HOUSEKEEPING_INTERVAL: Duration = Duration::from_secs(900);
 
     /// Build a recurring reconciliation-walk task for `vault_root`.
     #[must_use]
@@ -66,11 +74,40 @@ impl TaskKind {
         }
     }
 
+    /// Build a recurring git-housekeeping task for `vault_root`.
+    #[must_use]
+    pub fn git_housekeeping(vault_root: PathBuf) -> Self {
+        Self::GitHousekeeping {
+            vault_root,
+            interval: Some(Self::GIT_HOUSEKEEPING_INTERVAL),
+        }
+    }
+
+    /// Build a one-shot git-housekeeping task (for tests).
+    #[must_use]
+    pub fn git_housekeeping_once(vault_root: PathBuf) -> Self {
+        Self::GitHousekeeping {
+            vault_root,
+            interval: None,
+        }
+    }
+
+    /// Build a git-housekeeping task with a custom interval (for tests).
+    #[must_use]
+    pub fn git_housekeeping_with_interval(vault_root: PathBuf, interval: Duration) -> Self {
+        Self::GitHousekeeping {
+            vault_root,
+            interval: Some(interval),
+        }
+    }
+
     /// This task's own recurrence, if any — read by the runner after each run.
     #[must_use]
     pub fn interval(&self) -> Option<Duration> {
         match self {
-            Self::ReconcileWalk { interval, .. } => *interval,
+            Self::ReconcileWalk { interval, .. } | Self::GitHousekeeping { interval, .. } => {
+                *interval
+            }
         }
     }
 
@@ -79,6 +116,7 @@ impl TaskKind {
     pub const fn name(&self) -> &'static str {
         match self {
             Self::ReconcileWalk { .. } => "reconcile_walk",
+            Self::GitHousekeeping { .. } => "git_housekeeping",
         }
     }
 
@@ -86,7 +124,9 @@ impl TaskKind {
     #[must_use]
     pub fn vault_root(&self) -> Option<&PathBuf> {
         match self {
-            Self::ReconcileWalk { vault_root, .. } => Some(vault_root),
+            Self::ReconcileWalk { vault_root, .. } | Self::GitHousekeeping { vault_root, .. } => {
+                Some(vault_root)
+            }
         }
     }
 }
@@ -119,5 +159,12 @@ mod tests {
     fn reconcile_walk_once_has_no_interval() {
         let kind = TaskKind::reconcile_walk_once(PathBuf::from("/tmp/vault"));
         assert_eq!(kind.interval(), None);
+    }
+
+    #[test]
+    fn git_housekeeping_has_default_interval() {
+        let kind = TaskKind::git_housekeeping(PathBuf::from("/tmp/vault"));
+        assert_eq!(kind.interval(), Some(Duration::from_secs(900)));
+        assert_eq!(kind.name(), "git_housekeeping");
     }
 }

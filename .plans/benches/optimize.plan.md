@@ -10,7 +10,7 @@ todos:
     status: completed
   - id: opt-repo-gc
     content: "Repo growth / no GC (dimension 6): add a repack/gc step (on an explicit vault command, a periodic daemon task, or both) to bound the ~10KB-per-commit loose-object overhead measured at 20k commits (200MB for <2MB of real content)"
-    status: pending
+    status: completed
   - id: opt-filesize-warning
     content: "File size (dimension 3): surface a visible signal (log line, vault status entry, or both) when a file is skipped for exceeding max_file_bytes, instead of the current silent drop"
     status: pending

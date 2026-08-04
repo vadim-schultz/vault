@@ -14,6 +14,7 @@ chrono = { version = "0.4.45", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 fs4 = { version = "1", features = ["sync"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 gix = { version = "0.73.0", features = ["tree-editor"] }
 globset = "0.4"
 notify = "7"
@@ -48,6 +49,10 @@ harness = false
 
 [[bench]]
 name = "queue_latency"
+harness = false
+
+[[bench]]
+name = "housekeeping"
 harness = false
 
 [lints.rust]

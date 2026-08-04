@@ -19,6 +19,7 @@ use crate::walk::collect_baseline_changes;
 pub fn run(kind: &TaskKind) -> Result<(), VaultError> {
     match kind {
         TaskKind::ReconcileWalk { vault_root, .. } => reconcile_walk(vault_root),
+        TaskKind::GitHousekeeping { vault_root, .. } => git_housekeeping(vault_root),
     }
 }
 
@@ -51,6 +52,30 @@ pub fn reconcile_walk(vault_root: &Path) -> Result<(), VaultError> {
     Ok(())
 }
 
+/// Check git housekeeping thresholds and repack when due.
+///
+/// # Errors
+///
+/// Returns [`VaultError`] when vault metadata or housekeeping fails.
+pub fn git_housekeeping(vault_root: &Path) -> Result<(), VaultError> {
+    let layout = VaultLayout::from_worktree(vault_root.to_path_buf());
+    let config = VaultConfig::load(&layout.config_path())?;
+    let status = crate::storage::housekeeping::maybe_run(&layout, &config.gc)?;
+    if status.repack_ran {
+        let reclaimed = status.last_repack.as_ref().map_or(0, |record| {
+            record.bytes_before.saturating_sub(record.bytes_after)
+        });
+        daemon::append_log(&format!(
+            "git_housekeeping {}: repacked {} objects, removed {} loose files, reclaimed {} bytes",
+            vault_root.display(),
+            status.last_repack.as_ref().map_or(0, |r| r.objects_packed),
+            status.last_repack.as_ref().map_or(0, |r| r.loose_removed),
+            reclaimed,
+        ))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -60,8 +85,9 @@ mod tests {
     use super::*;
     use crate::adapters::{GixObjectStore, SqliteMetaIndex, SystemClock};
     use crate::app::snapshot;
-    use crate::domain::{FileChange, FileEventKind, RelPath};
+    use crate::domain::{FileChange, FileEventKind, RelPath, TaskKind};
     use crate::paths::{daemon_log_path, STATE_DIR_ENV};
+    use crate::ports::ObjectStore;
     use crate::storage;
 
     fn init_vault(dir: &TempDir) -> VaultLayout {
@@ -121,6 +147,38 @@ mod tests {
         let contents = fs::read_to_string(log_path).expect("read log");
         assert!(contents.contains("1 file(s) mismatch"));
         assert!(contents.contains("1 untracked on disk"));
+
+        std::env::remove_var(STATE_DIR_ENV);
+    }
+
+    #[test]
+    fn git_housekeeping_logs_when_repack_runs() {
+        let _guard = crate::paths::STATE_ENV_LOCK.lock().expect("lock");
+        let state_dir = TempDir::new().expect("state tempdir");
+        std::env::set_var(STATE_DIR_ENV, state_dir.path());
+
+        let dir = TempDir::new().expect("vault tempdir");
+        let layout = init_vault(&dir);
+        let object_store = GixObjectStore::open(&layout).expect("git");
+        for i in 0..3 {
+            let rel = format!("f-{i}.md");
+            fs::write(layout.worktree.join(&rel), b"x").expect("write");
+            let changes = vec![FileChange {
+                rel: RelPath::parse(&rel),
+                kind: FileEventKind::Create,
+            }];
+            object_store.commit(&changes, "seed").expect("commit");
+        }
+        let mut config = VaultConfig::defaults();
+        config.gc.loose_object_limit = 1;
+        config.write_to(&layout.config_path()).expect("config");
+
+        run(&TaskKind::git_housekeeping_once(layout.worktree.clone())).expect("handler");
+
+        let log_path = daemon_log_path().expect("log path");
+        let contents = fs::read_to_string(log_path).expect("read log");
+        assert!(contents.contains("git_housekeeping"));
+        assert!(contents.contains("repacked"));
 
         std::env::remove_var(STATE_DIR_ENV);
     }

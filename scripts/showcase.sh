@@ -130,9 +130,10 @@ inspect_queue_status() {
     section "vault status (includes background work queue)"
     vlt status
     echo ""
-    echo "The daemon seeds a recurring reconcile_walk per registered vault at startup"
-    echo "(every 10 minutes thereafter). While a task is pending, status lists it as"
-    echo "'Queue: N pending' with id, kind, lane, and attempts — sourced from queue.json."
+    echo "The daemon seeds recurring reconcile_walk (every 10 min) and git_housekeeping"
+    echo "(every 15 min) tasks per registered vault at startup. While a task is pending,"
+    echo "status lists it as 'Queue: N pending' with id, kind, lane, and attempts —"
+    echo "sourced from queue.json."
 }
 
 inspect() {
@@ -275,6 +276,45 @@ sleep "$DEBOUNCE_WAIT"
 echo "ignored.tmp should be absent from both list and the git tree:"
 vlt list
 inspect
+
+section "14. git housekeeping — conditional repack when loose objects exceed [gc] threshold"
+echo "ground truth before housekeeping:"
+git --git-dir="$VAULT_DIR/.git" count-objects -v
+echo "lowering [gc].loose_object_limit so the next check will repack"
+if grep -q '^\[gc\]' "$VAULT_DIR/config.toml"; then
+    sed -i '/^\[gc\]/,/^\[/ s/^loose_object_limit = .*/loose_object_limit = 5/' "$VAULT_DIR/config.toml"
+else
+    cat >>"$VAULT_DIR/config.toml" <<'EOF'
+
+[gc]
+loose_object_limit = 5
+EOF
+fi
+for i in 1 2 3; do
+    echo "extra edit $i for housekeeping demo" >>notes.md
+    sleep "$DEBOUNCE_WAIT"
+done
+echo "restarting the daemon so git_housekeeping is re-enqueued immediately at startup"
+kill "$DAEMON_PID"
+wait "$DAEMON_PID" 2>/dev/null || true
+"$VAULT_BIN" daemon --foreground &
+DAEMON_PID=$!
+sleep 1
+echo "polling queue.json for a pending git_housekeeping task..."
+for _ in $(seq 1 40); do
+    if [[ -f "$STATE_DIR/queue.json" ]] &&
+        grep -q '"kind": "git_housekeeping"' "$STATE_DIR/queue.json" 2>/dev/null; then
+        break
+    fi
+    sleep 0.05
+done
+inspect_queue_status
+inspect_daemon_state
+wait_for "housekeeping repack" bash -c "[[ \$(git --git-dir='$VAULT_DIR/.git' count-objects -v | awk '/^count:/{print \$2}') -le 5 ]]"
+echo "ground truth after housekeeping:"
+git --git-dir="$VAULT_DIR/.git" count-objects -v
+vlt status
+pause
 
 section "Final recap"
 vlt log

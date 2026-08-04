@@ -126,7 +126,7 @@ pub async fn run_foreground() -> Result<(), VaultError> {
 
     let store = Arc::new(InMemoryQueueStore::new());
     let queue = Arc::new(WorkQueue::new(store));
-    seed_reconcile_tasks(&queue)?;
+    seed_background_tasks(&queue)?;
 
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shutdown_task = spawn_shutdown_listener(shutdown_tx);
@@ -143,11 +143,12 @@ pub async fn run_foreground() -> Result<(), VaultError> {
     watcher_result
 }
 
-fn seed_reconcile_tasks(queue: &WorkQueue) -> Result<(), VaultError> {
+fn seed_background_tasks(queue: &WorkQueue) -> Result<(), VaultError> {
     let registry = VaultRegistry::load()?;
     for entry in &registry.vault {
         if entry.enabled && entry.root.is_dir() {
             let _ = queue.enqueue(TaskKind::reconcile_walk(entry.root.clone()))?;
+            let _ = queue.enqueue(TaskKind::git_housekeeping(entry.root.clone()))?;
         }
     }
     Ok(())
