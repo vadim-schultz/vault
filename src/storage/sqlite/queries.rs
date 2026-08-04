@@ -23,7 +23,12 @@ CREATE TABLE file_events (
     UNIQUE(snapshot_id, path)
 );
 CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+CREATE INDEX idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);
 ";
+
+/// Idempotent migration applied on every `meta.db` open for vaults created before the index existed.
+pub const ENSURE_SNAPSHOTS_CREATED_AT_INDEX: &str =
+    "CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);";
 
 /// Insert one snapshot row.
 pub const INSERT_SNAPSHOT: &str = "INSERT INTO snapshots (commit_sha, created_at) VALUES (?1, ?2)";
@@ -74,9 +79,11 @@ pub const SELECT_TRACKED_FILES: &str = "
 SELECT f.path, s.created_at
 FROM file_events f
 JOIN snapshots s ON f.snapshot_id = s.id
-WHERE f.snapshot_id = (
-    SELECT MAX(f2.snapshot_id) FROM file_events f2 WHERE f2.path = f.path
-)
-AND f.event_type != 'delete'
+JOIN (
+    SELECT path, MAX(snapshot_id) AS snapshot_id
+    FROM file_events
+    GROUP BY path
+) latest ON f.path = latest.path AND f.snapshot_id = latest.snapshot_id
+WHERE f.event_type != 'delete'
 ORDER BY f.path
 ";

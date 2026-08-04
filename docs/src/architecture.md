@@ -185,6 +185,7 @@ CREATE TABLE file_events (
     UNIQUE(snapshot_id, path)
 );
 CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+CREATE INDEX idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);
 ```
 
 Example query (after snapshots exist):

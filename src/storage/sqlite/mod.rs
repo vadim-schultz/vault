@@ -34,6 +34,7 @@ impl MetaDb {
         if table_count == 0 {
             conn.execute_batch(queries::SCHEMA)?;
         }
+        conn.execute(queries::ENSURE_SNAPSHOTS_CREATED_AT_INDEX, [])?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -312,5 +313,100 @@ mod tests {
             db.insert_snapshot(&record).expect("insert");
         }
         handle.join().expect("join");
+    }
+
+    #[test]
+    fn schema_creates_snapshots_created_at_index() {
+        let file = NamedTempFile::new().expect("tempfile");
+        let db = MetaDb::open(file.path()).expect("init");
+
+        let conn = db.conn.lock().expect("lock");
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_snapshots_created_at'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query index");
+        assert_eq!(index_count, 1);
+    }
+
+    #[test]
+    fn open_migrates_legacy_schema_without_snapshots_index() {
+        let file = NamedTempFile::new().expect("tempfile");
+        {
+            let conn = Connection::open(file.path()).expect("open legacy db");
+            conn.execute_batch(queries::CONNECTION_PRAGMAS)
+                .expect("pragmas");
+            conn.execute_batch(
+                "
+CREATE TABLE snapshots (
+    id INTEGER PRIMARY KEY,
+    commit_sha TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE file_events (
+    id INTEGER PRIMARY KEY,
+    snapshot_id INTEGER REFERENCES snapshots(id),
+    path TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    UNIQUE(snapshot_id, path)
+);
+CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+",
+            )
+            .expect("legacy schema");
+        }
+
+        let db = MetaDb::open(file.path()).expect("migrate on open");
+        let conn = db.conn.lock().expect("lock");
+        let index_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_snapshots_created_at'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("query index");
+        assert_eq!(index_count, 1);
+    }
+
+    #[test]
+    fn list_tracked_files_returns_latest_per_path_with_many_edits() {
+        let file = NamedTempFile::new().expect("tempfile");
+        let db = MetaDb::open(file.path()).expect("init");
+        db.insert_snapshot(&SnapshotRecord {
+            commit_sha: CommitSha("snap0".to_string()),
+            created_at: "2026-01-01T10:00:00Z".to_string(),
+            changes: vec![
+                FileChange {
+                    rel: RelPath::parse("a.md"),
+                    kind: FileEventKind::Create,
+                },
+                FileChange {
+                    rel: RelPath::parse("b.md"),
+                    kind: FileEventKind::Create,
+                },
+            ],
+        })
+        .expect("insert baseline");
+
+        for i in 1..=200 {
+            db.insert_snapshot(&SnapshotRecord {
+                commit_sha: CommitSha(format!("snap{i}")),
+                created_at: format!("2026-01-01T{i:02}:00:00Z"),
+                changes: vec![FileChange {
+                    rel: RelPath::parse("a.md"),
+                    kind: FileEventKind::Modify,
+                }],
+            })
+            .expect("insert modify");
+        }
+
+        let tracked = db.list_tracked_files().expect("list tracked");
+        assert_eq!(tracked.len(), 2);
+        assert_eq!(tracked[0].0, "a.md");
+        assert_eq!(tracked[0].1, "2026-01-01T200:00:00Z");
+        assert_eq!(tracked[1].0, "b.md");
+        assert_eq!(tracked[1].1, "2026-01-01T10:00:00Z");
     }
 }

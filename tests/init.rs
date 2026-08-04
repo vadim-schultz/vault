@@ -103,12 +103,17 @@ fn assert_schema(db_path: &Path) {
     assert!(names.contains(&"snapshots".to_string()));
     assert!(names.contains(&"file_events".to_string()));
 
+    assert_index_exists(&conn, "idx_file_events_path_time");
+    assert_index_exists(&conn, "idx_snapshots_created_at");
+}
+
+fn assert_index_exists(conn: &Connection, name: &str) {
     let index_count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_file_events_path_time'",
-            [],
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            [name],
             |row| row.get(0),
         )
         .expect("query index");
-    assert_eq!(index_count, 1);
+    assert_eq!(index_count, 1, "expected index {name}");
 }

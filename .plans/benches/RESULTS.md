@@ -13,7 +13,7 @@ to do about each "needs limit" / "needs fix" verdict below.
 
 | # | Dimension | Verdict | One-line finding |
 |---|-----------|---------|-------------------|
-| 1 | History depth | **needs fix** | `resolve_at` scans linearly — confirmed, no surprises |
+| 1 | History depth | **fixed** | `resolve_at` and `list_tracked_files` no longer scale linearly with total edits — see [history_index.plan.md](history_index.plan.md) |
 | 2 | File count (breadth) | **needs fix** | Single-file edits get slower as *total* tracked files grow — assumption refuted |
 | 3 | File size | **needs limit** | Over-limit files are silently dropped, zero user-visible signal |
 | 4 | Edit burst size | **needs fix — highest priority** | Silent data loss past ~10k simultaneous file events |
@@ -26,7 +26,10 @@ to do about each "needs limit" / "needs fix" verdict below.
 ## 1. History depth — `benches/history_depth.rs`
 
 Hypothesis: `snapshots.created_at` has no index, so `resolve_at` (backs `show`/`diff`/`restore`)
-degrades to a full table scan as total snapshot count grows. **Confirmed.**
+degrades to a full table scan as total snapshot count grows. **Confirmed** (2026-08-03 baseline).
+**Fixed** 2026-08-04 — see [history_index.plan.md](history_index.plan.md).
+
+### Before (2026-08-03, macOS APFS)
 
 | Snapshots | `resolve_at` | `list_snapshots(None)` (`log`) | `list_snapshots(Some(path))` | `list_tracked_files` (`list`) |
 |-----------|-------------:|----------------------------:|------------------------------:|-------------------------------:|
@@ -35,17 +38,23 @@ degrades to a full table scan as total snapshot count grows. **Confirmed.**
 | 10,000 | 545 µs | 1.95 ms | 89.5 µs | 2.82 ms |
 | 50,000 | 3.15 ms | 16.0 ms | 1.07 ms | 15.6 ms |
 
-All four scale roughly linearly with total row count. `resolve_at` and `list_tracked_files` are
-the two that matter most: every `show`/`diff`/`restore` call pays the `resolve_at` cost, and
-`list_tracked_files` (`vault list`) scales with **total edit count**, not distinct file count,
-even though the query's job is to return one row per distinct file — the correlated subquery in
-`SELECT_TRACKED_FILES` re-evaluates per underlying row, not per distinct path. `list_snapshots`
-(both variants) is inherently O(n) in output size regardless of indexing since there's no
-pagination — that's a separate, milder issue from the missing index.
+`resolve_at` and `list_tracked_files` scaled linearly with total row count. Root causes: missing
+index on `snapshots.created_at`, and a correlated subquery in `SELECT_TRACKED_FILES` evaluated per
+`file_events` row rather than per distinct path.
 
-At realistic scale (a vault edited daily for a year is ~365-off snapshots) none of this is
-user-visible. It becomes visible somewhere in the tens of thousands of total edits — plausible
-for a vault watched continuously over several years, or one with very frequent small edits.
+### After (2026-08-04, Linux, release build)
+
+| Snapshots | `resolve_at` | `list_snapshots(None)` (`log`) | `list_snapshots(Some(path))` | `list_tracked_files` (`list`) |
+|-----------|-------------:|----------------------------:|------------------------------:|-------------------------------:|
+| 100 | 3.9 µs | 27.5 µs | 5.7 µs | 37.1 µs |
+| 1,000 | 4.3 µs | 293 µs | 14.5 µs | 79.3 µs |
+| 10,000 | 4.2 µs | 3.48 ms | 105 µs | 461 µs |
+| 50,000 | 3.2 µs | 15.6 ms | 1.23 ms | 2.14 ms |
+
+`resolve_at` is now flat across 100 → 50,000 snapshots (~4 µs). `list_tracked_files` scales with
+distinct path count (50 paths in the bench fixture) rather than total edit count — 15.6 ms → 2.1 ms
+at 50k snapshots. `list_snapshots(None)` remains linear in output size (no pagination); that is
+unchanged and expected.
 
 ## 2. File count (breadth) — `benches/file_count.rs`
 
