@@ -30,7 +30,7 @@ todos:
     content: "Results doc (per-dimension knee point, metric, verdict: fine / needs limit / needs fix), CHANGELOG + docs update, decide CI wiring (small smoke scale in CI, full scale manual-only)"
     status: pending
   - id: bench-optimize-plan-draft
-    content: "Draft .plans/optimize.plan.md from the results doc: one section per dimension verdicted 'needs limit' or 'needs fix', each with the measured knee point, the proposed fix or guard, and expected impact — reviewed separately before any implementation starts"
+    content: "Draft optimize.plan.md from the results doc: one section per dimension verdicted 'needs limit' or 'needs fix', each with the measured knee point, the proposed fix or guard, and expected impact — reviewed separately before any implementation starts"
     status: pending
 isProject: false
 ---
@@ -49,8 +49,8 @@ hard numbers. **This plan measures only — it does not fix anything.** Deciding
 gets a graceful limit/warning or an actual fix, and how, is the job of a follow-up optimization
 plan (drafted as this plan's final artifact, then reviewed on its own).
 
-**Parent context:** post-MVP hardening, not a numbered chapter — same category as
-[architecture.plan.md](architecture.plan.md).
+**Parent context:** post-MVP hardening — see [mvp/README.md](../mvp/README.md) for the landed
+bootstrap summary and [mvp/architecture.md](../mvp/architecture.md) for the architecture reference.
 
 ## Dimensions to stress
 
@@ -86,7 +86,7 @@ path length (tree editor / `RelPath` behavior on deeply nested vaults).
    patched." This keeps the numbers honest (nothing here is tuned by a fix made mid-benchmark) and
    keeps the two plans reviewable independently — this one on methodology and findings, the
    optimization plan on proposed changes and risk. The last todo drafts that follow-up plan
-   (`.plans/optimize.plan.md`) directly from the results doc: one entry per dimension that came back
+   (`optimize.plan.md`) directly from the results doc: one entry per dimension that came back
    "needs limit" or "needs fix," each citing its measured knee point.
 4. **Scale ceiling is set per dimension by when it stops being interesting**, not a fixed number —
    stop scaling a dimension once wall-clock crosses roughly 1s for an interactive command (show,
@@ -113,6 +113,6 @@ path length (tree editor / `RelPath` behavior on deeply nested vaults).
 - The two grounded hypotheses (unindexed `resolve_at`, full-registry reload) are confirmed or
   refuted with numbers, not left as speculation.
 - A results doc exists summarizing all 7 dimensions in one place for future reference.
-- `.plans/optimize.plan.md` exists, drafted from that results doc, covering every "needs limit" /
+- `optimize.plan.md` exists, drafted from that results doc, covering every "needs limit" /
   "needs fix" verdict with its measured knee point — ready for its own review before any
   implementation begins. No code changes to fix a bottleneck happen under this plan.

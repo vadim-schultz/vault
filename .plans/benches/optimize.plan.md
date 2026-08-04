@@ -1,6 +1,6 @@
 ---
 name: Optimize — Vault Bottleneck Fixes
-overview: Proposed fixes for every dimension benches/RESULTS.md verdicted "needs limit" or "needs fix", each citing its measured knee point from real runs, not speculation. Drafted as the final artifact of the benchmark plan — this plan itself needs its own review before any implementation begins; nothing here is landed yet.
+overview: Proposed fixes for every dimension RESULTS.md verdicted "needs limit" or "needs fix", each citing its measured knee point from real runs, not speculation. Drafted as the final artifact of the benchmark plan — this plan itself needs its own review before any implementation begins; nothing here is landed yet.
 todos:
   - id: opt-burst-investigate-and-fix
     content: "Edit burst silent data loss (dimension 4, highest priority): root-cause why ~16-43% of files vanish above 10k simultaneous creates with zero error (notify/FSEvents coalescing vs. an internal debouncer/channel drop), then either fix the drop or add a detectable failure mode (error, warning, or a periodic reconciliation re-walk) so it's never silent"
@@ -27,8 +27,8 @@ isProject: false
 
 ## Context
 
-[`.plans/benchmark.plan.md`](benchmark.plan.md) measured 7 load dimensions and recorded every
-number in [`benches/RESULTS.md`](../benches/RESULTS.md). Six of the seven came back "needs limit"
+[benchmark.plan.md](benchmark.plan.md) measured 7 load dimensions and recorded every
+number in [RESULTS.md](RESULTS.md). Six of the seven came back "needs limit"
 or "needs fix"; only concurrent readers-vs-writer (dimension 7) was fine as-is. This plan turns
 those six findings into proposed fixes — one section per dimension, each citing its measured
 knee point, a concrete proposed change, and how to verify the fix actually moved the number.
@@ -63,7 +63,7 @@ Ranked by severity of the failure mode, not by ease of fix:
 
 **Measured:** 0% loss at ≤5,000 simultaneous file creates; 16.4% loss at 10,000; 37.5% at 15,000;
 42.8% at 20,000 — reproduced twice, consistent knee point between 5k and 10k. Zero errors or
-warnings anywhere (daemon log, `vault status`) when it happens (`benches/RESULTS.md` § 4).
+warnings anywhere (daemon log, `vault status`) when it happens (`RESULTS.md` § 4).
 
 **Proposed fix:** Two-part, since the root cause isn't confirmed yet:
 
@@ -88,7 +88,7 @@ surfaced warning at the point loss would otherwise occur.
 ## 2. Repo growth / no GC
 
 **Measured:** ~10KB of on-disk git object storage per commit for under 100 bytes of actual unique
-content — 200MB of loose objects at 20,000 commits to a single file (`benches/RESULTS.md` § 6).
+content — 200MB of loose objects at 20,000 commits to a single file (`RESULTS.md` § 6).
 No `git gc`/repack exists anywhere in the codebase today.
 
 **Proposed fix:** Add a repack step using gix's pack-writing support (avoiding a shell-out to the
@@ -109,7 +109,7 @@ than ~10KB/commit.
 ## 3. History depth index
 
 **Measured:** `resolve_at` scales linearly with total snapshot count — 8.5µs at 100 rows, 3.15ms
-at 50,000 (`benches/RESULTS.md` § 1). `snapshots` has no index on `created_at`; only
+at 50,000 (`RESULTS.md` § 1). `snapshots` has no index on `created_at`; only
 `file_events(path, snapshot_id)` is indexed. Separately, `list_tracked_files` (`vault list`)
 scales with total edit count rather than distinct file count because `SELECT_TRACKED_FILES`'s
 correlated `MAX(snapshot_id)` subquery is evaluated per underlying row, not per distinct path.
@@ -129,7 +129,7 @@ current clean linear slope.
 
 **Measured:** Files over `max_file_bytes` (default 10MB) are correctly excluded from every
 snapshot, but nothing — not `vault status`, not a log line, not the exit code of any command —
-tells the user this happened (`benches/RESULTS.md` § 3).
+tells the user this happened (`RESULTS.md` § 3).
 
 **Proposed fix:** Surface the skip somewhere the user will actually see it without asking:
 `vault status` gaining a "N files currently over the size limit, not tracked: <paths>" line seems
@@ -144,7 +144,7 @@ state.
 
 **Measured:** `Router::from_registry` — which reloads every registered vault's config and
 compiled ignore matcher — takes 129ms at 2,000 vaults, and runs on **every** hot-reload tick
-(`benches/RESULTS.md` § 5), pausing the watcher's event processing for that long each time any
+(`RESULTS.md` § 5), pausing the watcher's event processing for that long each time any
 vault's registration changes anywhere on the machine.
 
 **Proposed fix:** Cache loaded `WatchedVault`s across reloads and only reload the ones whose
@@ -158,7 +158,7 @@ linear in total vault count.
 ## 6. File count / flat-tree edit cost — investigate before fixing
 
 **Measured:** Steady-state single-file commit cost grows with total tracked file count even when
-only one file changes — 2.85ms at 1,000 tracked files, 76.8ms at 50,000 (`benches/RESULTS.md`
+only one file changes — 2.85ms at 1,000 tracked files, 76.8ms at 50,000 (`RESULTS.md`
 § 2) — refuting the initial assumption that gix's tree editor keeps this cheap regardless of
 scale. Likely cause: the benchmark fixture is a flat single directory, and a git tree object
 serializes its *entire* entry list, so any change re-writes and re-hashes all of it.
@@ -185,6 +185,6 @@ todo turn into an actual fix proposal.
 - Every todo above has a decision recorded (fixed, limited-and-documented, or explicitly deferred
   with a reason) before implementation is considered "this plan is done."
 - Every fix implemented has a before/after re-run of its citing benchmark or stress script showing
-  the knee point moved, added to `benches/RESULTS.md`.
+  the knee point moved, added to `RESULTS.md`.
 - Dimension 6 (file count) has its subdirectory-sharding question answered before any structural
   change is attempted there.

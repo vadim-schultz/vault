@@ -2,8 +2,9 @@
 
 ## Starting a new chapter
 
-Before beginning implementation of any chapter plan (`.plans/chapter_N.plan.md` or any other
-plan under `.plans/`), always sync with `main` and branch from a clean, up-to-date tip:
+Before beginning implementation of any plan under `.plans/` (e.g. `.plans/benches/optimize.plan.md`
+or a chapter plan in `.plans/mvp/chapters/`), always sync with `main` and branch from a clean,
+up-to-date tip:
 
 ```bash
 git checkout main && git pull

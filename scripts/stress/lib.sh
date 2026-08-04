@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared helpers for scripts/stress/*.sh — real daemon + real filesystem stress runs.
-# These are manual profiling tools, not CI gates (see .plans/benchmark.plan.md).
+# These are manual profiling tools, not CI gates (see .plans/benches/benchmark.plan.md).
 
 STRESS_LIB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VAULT_BIN="${VAULT_BIN:-$STRESS_LIB_ROOT/target/release/vault}"
