@@ -13,6 +13,7 @@ Chapter-based bootstrap plans for the Vault document version manager. Update the
 | [chapter_5.plan.md](chapter_5.plan.md) | Time-travel read commands — show/log/diff/restore/list, gix blob reads, CLI date parsing |
 | [benchmark.plan.md](benchmark.plan.md) | Benchmark & stress-test suite — scale edit count, file count, vault count, and more to find bottlenecks (measurement only) |
 | [optimize.plan.md](optimize.plan.md) | Proposed fixes for the bottlenecks benchmark.plan.md found, one section per dimension, citing measured numbers — draft, pending its own review |
+| [cli_refactor.plan.md](cli_refactor.plan.md) | Split src/cli/mod.rs + render.rs into one file per command, fix adapter-import leakage into a single composition-root seam — complete |
 
 ## Chapter status
 

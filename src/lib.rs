@@ -3,7 +3,7 @@
 pub mod adapters;
 pub mod app;
 pub mod at_date;
-pub mod cli;
+mod cli;
 pub mod config;
 pub mod daemon;
 pub mod domain;
