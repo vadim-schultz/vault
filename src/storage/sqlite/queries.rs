@@ -8,8 +8,19 @@ pub const CONNECTION_PRAGMAS: &str =
 pub const COUNT_SNAPSHOTS_TABLE: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'snapshots'";
 
-/// Schema applied on `vault init`.
-pub const SCHEMA: &str = "
+/// Return 1 when an index with the given name exists.
+pub const COUNT_INDEX_BY_NAME: &str =
+    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1";
+
+/// Index matching ``file_events(path, snapshot_id)``.
+pub const IDX_FILE_EVENTS_PATH_TIME: &str = "idx_file_events_path_time";
+
+/// Index matching ``snapshots(created_at DESC, id DESC)``.
+pub const IDX_SNAPSHOTS_CREATED_AT: &str = "idx_snapshots_created_at";
+
+macro_rules! schema_tables {
+    () => {
+        "
 CREATE TABLE snapshots (
     id INTEGER PRIMARY KEY,
     commit_sha TEXT NOT NULL,
@@ -22,8 +33,30 @@ CREATE TABLE file_events (
     event_type TEXT NOT NULL,
     UNIQUE(snapshot_id, path)
 );
-CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
-";
+"
+    };
+}
+
+/// Schema as applied before ``idx_snapshots_created_at`` existed.
+#[cfg(test)]
+pub const LEGACY_SCHEMA: &str = concat!(
+    schema_tables!(),
+    "CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+",
+);
+
+/// Schema applied on `vault init`.
+pub const SCHEMA: &str = concat!(
+    schema_tables!(),
+    "CREATE INDEX idx_file_events_path_time ON file_events(path, snapshot_id);
+",
+    "CREATE INDEX idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);
+",
+);
+
+/// Idempotent migration applied on every `meta.db` open for vaults created before the index existed.
+pub const ENSURE_SNAPSHOTS_CREATED_AT_INDEX: &str =
+    "CREATE INDEX IF NOT EXISTS idx_snapshots_created_at ON snapshots(created_at DESC, id DESC);";
 
 /// Insert one snapshot row.
 pub const INSERT_SNAPSHOT: &str = "INSERT INTO snapshots (commit_sha, created_at) VALUES (?1, ?2)";
@@ -74,9 +107,11 @@ pub const SELECT_TRACKED_FILES: &str = "
 SELECT f.path, s.created_at
 FROM file_events f
 JOIN snapshots s ON f.snapshot_id = s.id
-WHERE f.snapshot_id = (
-    SELECT MAX(f2.snapshot_id) FROM file_events f2 WHERE f2.path = f.path
-)
-AND f.event_type != 'delete'
+JOIN (
+    SELECT path, MAX(snapshot_id) AS snapshot_id
+    FROM file_events
+    GROUP BY path
+) latest ON f.path = latest.path AND f.snapshot_id = latest.snapshot_id
+WHERE f.event_type != 'delete'
 ORDER BY f.path
 ";

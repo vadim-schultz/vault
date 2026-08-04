@@ -20,22 +20,25 @@ pub struct WatcherConfig {
 impl Default for WatcherConfig {
     fn default() -> Self {
         Self {
-            debounce_ms: Self::default_debounce_ms(),
-            max_file_bytes: Self::default_max_file_bytes(),
+            debounce_ms: Self::DEFAULT_DEBOUNCE_MS,
+            max_file_bytes: Self::DEFAULT_MAX_FILE_BYTES,
         }
     }
 }
 
 impl WatcherConfig {
-    const fn default_debounce_ms() -> u64 {
-        2000
-    }
-
     /// Default debounce interval in milliseconds.
     pub const DEFAULT_DEBOUNCE_MS: u64 = 2000;
 
+    /// Default maximum file size in bytes to snapshot.
+    pub const DEFAULT_MAX_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
+    const fn default_debounce_ms() -> u64 {
+        Self::DEFAULT_DEBOUNCE_MS
+    }
+
     const fn default_max_file_bytes() -> u64 {
-        10 * 1024 * 1024
+        Self::DEFAULT_MAX_FILE_BYTES
     }
 }
 

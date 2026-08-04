@@ -8,21 +8,61 @@ use gix::object::tree::EntryKind;
 use crate::domain::{FileChange, FileEventKind};
 use crate::error::VaultError;
 
-fn with_fallback_cwd<T>(
-    fallback: &Path,
-    action: impl FnOnce() -> Result<T, VaultError>,
-) -> Result<T, VaultError> {
-    let restore = if let Ok(current) = std::env::current_dir() {
-        Some(current)
-    } else {
-        std::env::set_current_dir(fallback)?;
-        None
-    };
-    let result = action();
-    if let Some(dir) = restore {
-        let _ = std::env::set_current_dir(dir);
+/// Saves the process cwd on entry and restores it on drop; uses `worktree` when cwd is unavailable.
+struct WorktreeCwd<'a> {
+    restore: Option<PathBuf>,
+    _worktree: &'a Path,
+}
+
+impl<'a> WorktreeCwd<'a> {
+    fn enter(worktree: &'a Path) -> Result<Self, VaultError> {
+        let restore = if let Ok(current) = std::env::current_dir() {
+            Some(current)
+        } else {
+            std::env::set_current_dir(worktree)?;
+            None
+        };
+        Ok(Self {
+            restore,
+            _worktree: worktree,
+        })
     }
-    result
+}
+
+impl Drop for WorktreeCwd<'_> {
+    fn drop(&mut self) {
+        if let Some(dir) = self.restore.take() {
+            let _ = std::env::set_current_dir(dir);
+        }
+    }
+}
+
+type GitStoreHandler = fn(&Path, &Path) -> Result<GitStore, VaultError>;
+
+fn dispatch_in_worktree(
+    git_dir: &Path,
+    worktree: &Path,
+    handler: GitStoreHandler,
+) -> Result<GitStore, VaultError> {
+    let _cwd = WorktreeCwd::enter(worktree)?;
+    handler(git_dir, worktree)
+}
+
+fn create_bare_store(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
+    if let Some(parent) = git_dir.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    create_repo(git_dir, Kind::Bare, Options::default()).map_err(VaultError::git)?;
+    open_existing_store(git_dir, worktree)
+}
+
+fn open_existing_store(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
+    let repo = gix::open(git_dir).map_err(VaultError::git)?;
+    Ok(GitStore {
+        repo,
+        git_dir: git_dir.to_path_buf(),
+        worktree: worktree.to_path_buf(),
+    })
 }
 
 /// Inputs shared by tree-edit handlers.
@@ -114,12 +154,8 @@ impl GitStore {
         changes: &[FileChange],
         message: &str,
     ) -> Result<Option<String>, VaultError> {
-        let restore = std::env::current_dir().ok();
-        let result = self.commit_tree_inner(changes, message);
-        if let Some(dir) = restore {
-            let _ = std::env::set_current_dir(dir);
-        }
-        result
+        let _cwd = WorktreeCwd::enter(&self.worktree)?;
+        self.commit_tree_inner(changes, message)
     }
 
     fn commit_tree_inner(
@@ -246,13 +282,7 @@ impl GitStore {
 ///
 /// Returns [`VaultError::Git`] when repository creation or open fails.
 pub fn init(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
-    with_fallback_cwd(worktree, || {
-        if let Some(parent) = git_dir.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        create_repo(git_dir, Kind::Bare, Options::default()).map_err(VaultError::git)?;
-        open(git_dir, worktree)
-    })
+    dispatch_in_worktree(git_dir, worktree, create_bare_store)
 }
 
 /// Open an existing vault git store.
@@ -261,14 +291,7 @@ pub fn init(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
 ///
 /// Returns [`VaultError::Git`] when the repository cannot be opened.
 pub fn open(git_dir: &Path, worktree: &Path) -> Result<GitStore, VaultError> {
-    with_fallback_cwd(worktree, || {
-        let repo = gix::open(git_dir).map_err(VaultError::git)?;
-        Ok(GitStore {
-            repo,
-            git_dir: git_dir.to_path_buf(),
-            worktree: worktree.to_path_buf(),
-        })
-    })
+    dispatch_in_worktree(git_dir, worktree, open_existing_store)
 }
 
 #[cfg(test)]

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+* `resolve_at` (`show`/`diff`/`restore`) and `list_tracked_files` (`vault list`) no longer degrade linearly with total snapshot count — added `idx_snapshots_created_at` and rewrote `SELECT_TRACKED_FILES` to aggregate by path first; legacy `meta.db` files migrate on open.
+
 ### Added
 
 * Benchmark & stress-test suite (`benches/`, `scripts/stress/`, `examples/simulate_history.rs`) covering history depth, file count, file size, edit burst size, vault count, repo growth with no GC, and reader/writer concurrency — see `.plans/benches/RESULTS.md` for measured knee points and `.plans/benches/optimize.plan.md` for proposed fixes. Manual profiling tools only, not wired into CI.

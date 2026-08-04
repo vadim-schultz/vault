@@ -10,7 +10,9 @@ use rusqlite::{params, Connection};
 use crate::domain::SnapshotRecord;
 use crate::error::VaultError;
 
-pub use queries::SCHEMA;
+pub use queries::{
+    COUNT_INDEX_BY_NAME, IDX_FILE_EVENTS_PATH_TIME, IDX_SNAPSHOTS_CREATED_AT, SCHEMA,
+};
 
 /// `SQLite` metadata index with a held connection.
 pub struct MetaDb {
@@ -34,6 +36,7 @@ impl MetaDb {
         if table_count == 0 {
             conn.execute_batch(queries::SCHEMA)?;
         }
+        conn.execute(queries::ENSURE_SNAPSHOTS_CREATED_AT_INDEX, [])?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -312,5 +315,77 @@ mod tests {
             db.insert_snapshot(&record).expect("insert");
         }
         handle.join().expect("join");
+    }
+
+    #[test]
+    fn schema_creates_snapshots_created_at_index() {
+        let file = NamedTempFile::new().expect("tempfile");
+        let db = MetaDb::open(file.path()).expect("init");
+
+        let conn = db.conn.lock().expect("lock");
+        assert_index_exists(&conn, queries::IDX_SNAPSHOTS_CREATED_AT);
+    }
+
+    #[test]
+    fn open_migrates_legacy_schema_without_snapshots_index() {
+        let file = NamedTempFile::new().expect("tempfile");
+        {
+            let conn = Connection::open(file.path()).expect("open legacy db");
+            conn.execute_batch(queries::CONNECTION_PRAGMAS)
+                .expect("pragmas");
+            conn.execute_batch(queries::LEGACY_SCHEMA)
+                .expect("legacy schema");
+        }
+
+        let db = MetaDb::open(file.path()).expect("migrate on open");
+        let conn = db.conn.lock().expect("lock");
+        assert_index_exists(&conn, queries::IDX_SNAPSHOTS_CREATED_AT);
+    }
+
+    fn assert_index_exists(conn: &Connection, name: &str) {
+        let index_count: i64 = conn
+            .query_row(queries::COUNT_INDEX_BY_NAME, [name], |row| row.get(0))
+            .expect("query index");
+        assert_eq!(index_count, 1, "expected index {name}");
+    }
+
+    #[test]
+    fn list_tracked_files_returns_latest_per_path_with_many_edits() {
+        let file = NamedTempFile::new().expect("tempfile");
+        let db = MetaDb::open(file.path()).expect("init");
+        db.insert_snapshot(&SnapshotRecord {
+            commit_sha: CommitSha("snap0".to_string()),
+            created_at: "2026-01-01T10:00:00Z".to_string(),
+            changes: vec![
+                FileChange {
+                    rel: RelPath::parse("a.md"),
+                    kind: FileEventKind::Create,
+                },
+                FileChange {
+                    rel: RelPath::parse("b.md"),
+                    kind: FileEventKind::Create,
+                },
+            ],
+        })
+        .expect("insert baseline");
+
+        for i in 1..=200 {
+            db.insert_snapshot(&SnapshotRecord {
+                commit_sha: CommitSha(format!("snap{i}")),
+                created_at: format!("2026-01-01T{i:02}:00:00Z"),
+                changes: vec![FileChange {
+                    rel: RelPath::parse("a.md"),
+                    kind: FileEventKind::Modify,
+                }],
+            })
+            .expect("insert modify");
+        }
+
+        let tracked = db.list_tracked_files().expect("list tracked");
+        assert_eq!(tracked.len(), 2);
+        assert_eq!(tracked[0].0, "a.md");
+        assert_eq!(tracked[0].1, "2026-01-01T200:00:00Z");
+        assert_eq!(tracked[1].0, "b.md");
+        assert_eq!(tracked[1].1, "2026-01-01T10:00:00Z");
     }
 }
