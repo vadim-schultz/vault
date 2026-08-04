@@ -118,7 +118,7 @@ pub fn repack(git_dir: &Path) -> Result<RepackOutcome, VaultError> {
     let objects_packed = write_pack_from_head(git_dir)?;
     verify_loose_objects_packed(git_dir, &prep.loose_oids)?;
     cleanup_superseded_storage(git_dir, &prep.old_packs)?;
-    Ok(repack_outcome(prep, objects_packed, dir_size(git_dir)?))
+    Ok(repack_outcome(&prep, objects_packed, dir_size(git_dir)?))
 }
 
 /// Run housekeeping when thresholds are exceeded; always refresh the marker.
@@ -333,7 +333,7 @@ fn cleanup_superseded_storage(
     remove_pack_files(old_packs)
 }
 
-fn repack_outcome(prep: RepackPrep, objects_packed: usize, bytes_after: u64) -> RepackOutcome {
+fn repack_outcome(prep: &RepackPrep, objects_packed: usize, bytes_after: u64) -> RepackOutcome {
     RepackOutcome {
         ran_at: Utc::now(),
         objects_packed,
@@ -424,7 +424,9 @@ fn collect_loose_oids(git_dir: &Path) -> Result<Vec<Oid>, VaultError> {
     for_each_loose_object(&objects_dir(git_dir), |prefix, path| {
         let suffix = path
             .file_name()
-            .ok_or_else(|| VaultError::git(std::io::Error::other("loose object path has no filename")))?
+            .ok_or_else(|| {
+                VaultError::git(std::io::Error::other("loose object path has no filename"))
+            })?
             .to_string_lossy();
         let hex = format!("{prefix}{suffix}");
         oids.push(Oid::from_str(&hex).map_err(VaultError::git)?);
