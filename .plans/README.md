@@ -1,31 +1,24 @@
 # Vault implementation plans
 
-Chapter-based bootstrap plans for the Vault document version manager. Update these as chapters land.
+Two streams: the MVP bootstrap (landed) and ongoing benchmark / optimisation work.
 
-| Plan | Description |
-|------|-------------|
-| [chapter_0.plan.md](chapter_0.plan.md) | Overview — vision, architecture, tech stack, chapters 0–6 |
-| [chapter_1.plan.md](chapter_1.plan.md) | Empty repo, green CI — Cargo scaffold, minimal CLI, CI pipeline |
-| [chapter_2.plan.md](chapter_2.plan.md) | Documentation skeleton — mdBook site, GitHub Pages |
-| [chapter_3.plan.md](chapter_3.plan.md) | `vault init` + storage foundation — gix, SQLite, `.vault/` layout |
-| [chapter_4.plan.md](chapter_4.plan.md) | Singleton background watcher — registry, daemon, snapshots |
-| [architecture.plan.md](architecture.plan.md) | Ports-and-adapters refactor — layered crate layout |
-| [chapter_5.plan.md](chapter_5.plan.md) | Time-travel read commands — show/log/diff/restore/list, gix blob reads, CLI date parsing |
-| [benchmark.plan.md](benchmark.plan.md) | Benchmark & stress-test suite — scale edit count, file count, vault count, and more to find bottlenecks (measurement only) |
-| [optimize.plan.md](optimize.plan.md) | Proposed fixes for the bottlenecks benchmark.plan.md found, one section per dimension, citing measured numbers — draft, pending its own review |
-| [cli_refactor.plan.md](cli_refactor.plan.md) | Split src/cli/mod.rs + render.rs into one file per command, fix adapter-import leakage into a single composition-root seam — complete |
+## MVP bootstrap (complete)
 
-## Chapter status
+Summary, architecture reference, and archived chapter plans:
 
-| Chapter | Status | Plan |
-|---------|--------|------|
-| 0 — Overview & toolchain | In progress | [chapter_0.plan.md](chapter_0.plan.md) |
-| 1 — Empty repo, green CI | Complete | [chapter_1.plan.md](chapter_1.plan.md) |
-| 2 — Documentation skeleton | Complete | [chapter_2.plan.md](chapter_2.plan.md) |
-| 3 — `vault init` + storage | Complete | [chapter_3.plan.md](chapter_3.plan.md) |
-| 4 — Singleton watcher | Complete | [chapter_4.plan.md](chapter_4.plan.md) |
-| — Ports & adapters refactor | Complete | [architecture.plan.md](architecture.plan.md) |
-| 5 — Time-travel commands | Planned | [chapter_5.plan.md](chapter_5.plan.md) |
-| 6 — Release v0.1.0 | Pending | [chapter_0.plan.md](chapter_0.plan.md#chapter-6--release-v010) |
-| — Benchmark & stress-test suite | Complete | [benchmark.plan.md](benchmark.plan.md) |
-| — Optimize bottleneck fixes | Draft, pending review | [optimize.plan.md](optimize.plan.md) |
+| Document | Description |
+|----------|-------------|
+| [mvp/README.md](mvp/README.md) | Implementation stages, status table, vision |
+| [mvp/architecture.md](mvp/architecture.md) | Ports-and-adapters layout (compact reference) |
+| [mvp/chapters/](mvp/chapters/) | Archived chapter plans (ch 0–5, CLI refactor, showcase) |
+
+## Benchmark & optimisation (active)
+
+Measurement results and proposed fixes:
+
+| Document | Description |
+|----------|-------------|
+| [benches/README.md](benches/README.md) | Stream overview |
+| [benches/benchmark.plan.md](benches/benchmark.plan.md) | Stress-test suite plan (complete) |
+| [benches/RESULTS.md](benches/RESULTS.md) | Measured knee points and verdicts |
+| [benches/optimize.plan.md](benches/optimize.plan.md) | Proposed bottleneck fixes (draft) |

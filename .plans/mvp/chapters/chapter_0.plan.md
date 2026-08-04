@@ -208,7 +208,7 @@ Edition **2021**, MSRV **1.75** (stable toolchain via rustup).
 
 ## Repo layout (standard Rust binary crate)
 
-Single crate, binary + library ([Cargo book](https://doc.rust-lang.org/cargo/guide/project-layout.html) layout). After the ports-and-adapters refactor, the crate is layered: `domain` → `ports` → `app` / `adapters` → `cli` / `daemon` / `watcher`. See [architecture.plan.md](architecture.plan.md) for the full module tree.
+Single crate, binary + library ([Cargo book](https://doc.rust-lang.org/cargo/guide/project-layout.html) layout). After the ports-and-adapters refactor, the crate is layered: `domain` → `ports` → `app` / `adapters` → `cli` / `daemon` / `watcher`. See [architecture.md](../architecture.md) for the full module tree.
 
 ```
 vault/

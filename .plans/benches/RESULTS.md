@@ -5,8 +5,8 @@ vary by hardware; the *shape* of each curve (flat vs. linear vs. cliff) is what 
 expected to reproduce. Raw source: `benches/*.rs` (criterion, `cargo bench --bench <name>`) and
 `scripts/stress/*.rs` (real daemon + real filesystem, `bash scripts/stress/<name>.sh`).
 
-This doc is the measurement record for [`.plans/benchmark.plan.md`](../.plans/benchmark.plan.md).
-Fixes are out of scope here — see [`.plans/optimize.plan.md`](../.plans/optimize.plan.md) for what
+This doc is the measurement record for [benchmark.plan.md](benchmark.plan.md).
+Fixes are out of scope here — see [optimize.plan.md](optimize.plan.md) for what
 to do about each "needs limit" / "needs fix" verdict below.
 
 ## Summary
