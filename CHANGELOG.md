@@ -8,6 +8,10 @@
 
 ### Added
 
+* Background work queue in the daemon — swappable `QueueStore` port, FIFO `InMemoryQueueStore`, `WorkQueue` orchestrator, and a background runner. Long tasks enqueue and return immediately; recurring tasks self-reschedule via `TaskKind::interval`.
+* `reconcile_walk` task — periodic safety net (every 10 min per vault) that diffs disk against `list_tracked_files` and logs mismatches to `daemon.log` (partial fix for edit-burst silent data loss; root cause still open).
+* `vault status` queue section — reads `queue.json` (written by the daemon heartbeat tick) and lists pending tasks with id, kind, lane, and attempts.
+* `benches/queue_latency.rs` — compares synchronous `reconcile_walk` vs `enqueue` cost; results in `.plans/queue/RESULTS.md`.
 * Benchmark & stress-test suite (`benches/`, `scripts/stress/`, `examples/simulate_history.rs`) covering history depth, file count, file size, edit burst size, vault count, repo growth with no GC, and reader/writer concurrency — see `.plans/benches/RESULTS.md` for measured knee points and `.plans/benches/optimize.plan.md` for proposed fixes. Manual profiling tools only, not wired into CI.
 * Singleton background watcher — one daemon per user watches all registered vaults via `registry.toml` hot reload (`notify`).
 * `vault status` — daemon heartbeat, vault count, and last snapshot per registered vault.

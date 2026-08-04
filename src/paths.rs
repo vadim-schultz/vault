@@ -38,6 +38,9 @@ pub const DAEMON_LOCK: &str = "daemon.lock";
 /// Daemon heartbeat JSON file.
 pub const DAEMON_HEARTBEAT: &str = "daemon.json";
 
+/// Daemon work-queue snapshot JSON file.
+pub const DAEMON_QUEUE: &str = "queue.json";
+
 /// Daemon log file.
 pub const DAEMON_LOG: &str = "daemon.log";
 
@@ -123,6 +126,15 @@ pub fn daemon_lock_path() -> Result<PathBuf, VaultError> {
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn daemon_heartbeat_path() -> Result<PathBuf, VaultError> {
     Ok(state_dir()?.join(DAEMON_HEARTBEAT))
+}
+
+/// Return the path to `queue.json`.
+///
+/// # Errors
+///
+/// Returns [`VaultError::Io`] when the state directory cannot be resolved.
+pub fn daemon_queue_path() -> Result<PathBuf, VaultError> {
+    Ok(state_dir()?.join(DAEMON_QUEUE))
 }
 
 /// Return the path to `daemon.log`.

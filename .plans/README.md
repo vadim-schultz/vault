@@ -22,3 +22,5 @@ Measurement results and proposed fixes:
 | [benches/benchmark.plan.md](benches/benchmark.plan.md) | Stress-test suite plan (complete) |
 | [benches/RESULTS.md](benches/RESULTS.md) | Measured knee points and verdicts |
 | [benches/optimize.plan.md](benches/optimize.plan.md) | Proposed bottleneck fixes (draft) |
+| [queue/README.md](queue/README.md) | Background work queue stream |
+| [queue/RESULTS.md](queue/RESULTS.md) | Enqueue vs sync reconcile_walk latency |

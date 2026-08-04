@@ -11,6 +11,7 @@ pub mod error;
 pub mod ignore;
 pub mod paths;
 pub mod ports;
+pub mod queue;
 pub mod registry;
 pub mod service;
 pub mod snapshot;

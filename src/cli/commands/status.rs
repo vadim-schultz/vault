@@ -4,7 +4,7 @@ use std::fmt;
 
 use anyhow::Result;
 
-use crate::app::status::{self, DaemonStatus, StatusReport, VaultStatus};
+use crate::app::status::{self, DaemonStatus, QueueStatus, StatusReport, VaultStatus};
 use crate::cli::support::run_blocking;
 use crate::ports::ServiceState;
 
@@ -49,9 +49,26 @@ impl fmt::Display for VaultStatus {
 impl fmt::Display for StatusReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.daemon)?;
+        if let Some(queue) = &self.queue {
+            write!(f, "{queue}")?;
+        }
         write!(f, "Vaults: {}", self.vaults.len())?;
         for vault in &self.vaults {
             write!(f, "\n{vault}")?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for QueueStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Queue: {} pending", self.tasks.len())?;
+        for task in &self.tasks {
+            writeln!(
+                f,
+                "  #{} {} [{}] attempts={}",
+                task.id, task.kind, task.lane, task.attempts
+            )?;
         }
         Ok(())
     }
@@ -79,5 +96,30 @@ mod tests {
         };
         let output = format!("{status}");
         assert!(output.contains("Service: unsupported"));
+    }
+
+    #[test]
+    fn status_renders_queue_snapshot() {
+        let report = StatusReport {
+            daemon: DaemonStatus {
+                running: true,
+                service_state: ServiceState::Unsupported,
+                heartbeat: None,
+                heartbeat_age_secs: None,
+            },
+            queue: Some(QueueStatus {
+                updated_at: "2026-08-04T10:00:00Z".to_string(),
+                tasks: vec![status::QueueTaskStatus {
+                    id: 7,
+                    kind: "reconcile_walk".to_string(),
+                    lane: "default".to_string(),
+                    attempts: 0,
+                }],
+            }),
+            vaults: vec![],
+        };
+        let output = format!("{report}");
+        assert!(output.contains("Queue: 1 pending"));
+        assert!(output.contains("#7 reconcile_walk [default] attempts=0"));
     }
 }

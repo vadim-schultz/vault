@@ -12,3 +12,5 @@ a separate review pass.
 
 **Harness code:** `benches/*.rs` (criterion), `scripts/stress/*.sh` (daemon + real filesystem),
 `examples/simulate_history.rs`. Manual profiling tools — not wired into default CI.
+
+See also [queue stream](../queue/README.md) for the background work queue (`benches/queue_latency.rs`).
