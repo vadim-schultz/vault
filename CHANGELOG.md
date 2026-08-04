@@ -4,6 +4,7 @@
 
 ### Added
 
+* Benchmark & stress-test suite (`benches/`, `scripts/stress/`, `examples/simulate_history.rs`) covering history depth, file count, file size, edit burst size, vault count, repo growth with no GC, and reader/writer concurrency — see `benches/RESULTS.md` for measured knee points and `.plans/optimize.plan.md` for proposed fixes. Manual profiling tools only, not wired into CI.
 * Singleton background watcher — one daemon per user watches all registered vaults via `registry.toml` hot reload (`notify`).
 * `vault status` — daemon heartbeat, vault count, and last snapshot per registered vault.
 * `vault ignore PATTERN` — append ignore globs to `.vault/config.toml`.

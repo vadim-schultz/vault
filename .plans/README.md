@@ -11,6 +11,8 @@ Chapter-based bootstrap plans for the Vault document version manager. Update the
 | [chapter_4.plan.md](chapter_4.plan.md) | Singleton background watcher — registry, daemon, snapshots |
 | [architecture.plan.md](architecture.plan.md) | Ports-and-adapters refactor — layered crate layout |
 | [chapter_5.plan.md](chapter_5.plan.md) | Time-travel read commands — show/log/diff/restore/list, gix blob reads, CLI date parsing |
+| [benchmark.plan.md](benchmark.plan.md) | Benchmark & stress-test suite — scale edit count, file count, vault count, and more to find bottlenecks (measurement only) |
+| [optimize.plan.md](optimize.plan.md) | Proposed fixes for the bottlenecks benchmark.plan.md found, one section per dimension, citing measured numbers — draft, pending its own review |
 | [cli_refactor.plan.md](cli_refactor.plan.md) | Split src/cli/mod.rs + render.rs into one file per command, fix adapter-import leakage into a single composition-root seam — complete |
 
 ## Chapter status
@@ -25,3 +27,5 @@ Chapter-based bootstrap plans for the Vault document version manager. Update the
 | — Ports & adapters refactor | Complete | [architecture.plan.md](architecture.plan.md) |
 | 5 — Time-travel commands | Planned | [chapter_5.plan.md](chapter_5.plan.md) |
 | 6 — Release v0.1.0 | Pending | [chapter_0.plan.md](chapter_0.plan.md#chapter-6--release-v010) |
+| — Benchmark & stress-test suite | Complete | [benchmark.plan.md](benchmark.plan.md) |
+| — Optimize bottleneck fixes | Draft, pending review | [optimize.plan.md](optimize.plan.md) |
