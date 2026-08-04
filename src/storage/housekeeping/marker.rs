@@ -53,7 +53,10 @@ pub fn read_marker(vault_dir: &Path) -> Result<HousekeepingMarker, VaultError> {
     Ok(marker)
 }
 
-pub(crate) fn write_marker(vault_dir: &Path, marker: &HousekeepingMarker) -> Result<(), VaultError> {
+pub(crate) fn write_marker(
+    vault_dir: &Path,
+    marker: &HousekeepingMarker,
+) -> Result<(), VaultError> {
     let path = vault_dir.join(HOUSEKEEPING_FILE);
     let contents = serde_json::to_string_pretty(marker)?;
     fs::write(path, contents)?;

@@ -1,6 +1,6 @@
 //! In-memory metadata index fake.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use crate::domain::{CommitSha, RelPath, SnapshotEntry, SnapshotRecord, TrackedFile};
 use crate::error::VaultError;
@@ -57,15 +57,17 @@ impl MetaIndex for InMemoryMetaIndex {
                     created_at: record.created_at.clone(),
                     event: None,
                 }),
-                Some(p) => record
-                    .changes
-                    .iter()
-                    .find(|c| c.rel == *p)
-                    .map(|change| SnapshotEntry {
-                        commit_sha: record.commit_sha.clone(),
-                        created_at: record.created_at.clone(),
-                        event: Some(change.kind),
-                    }),
+                Some(p) => {
+                    record
+                        .changes
+                        .iter()
+                        .find(|c| c.rel == *p)
+                        .map(|change| SnapshotEntry {
+                            commit_sha: record.commit_sha.clone(),
+                            created_at: record.created_at.clone(),
+                            event: Some(change.kind),
+                        })
+                }
             })
             .collect();
         entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));

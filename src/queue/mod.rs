@@ -101,33 +101,34 @@ async fn process_task(queue: Arc<WorkQueue>, store: &Arc<dyn QueueStore>, task: 
     let result = tokio::task::spawn_blocking(move || handlers::run(&kind)).await;
 
     let finished = match result {
-        Ok(Ok(())) => match store.mark_complete(id) {
-            Ok(()) => true,
-            Err(err) => {
-                let _ = crate::daemon::append_log(&format!("queue complete error: {err}"));
-                false
-            }
-        },
-        Ok(Err(err)) => match store.mark_failed(id, &err.to_string()) {
-            Ok(FailOutcome::Dropped) => true,
-            Ok(FailOutcome::Requeued) => false,
-            Err(mark_err) => {
-                let _ = crate::daemon::append_log(&format!("queue fail error: {mark_err}"));
-                false
-            }
-        },
-        Err(_) => match store.mark_failed(id, "background task panicked") {
-            Ok(FailOutcome::Dropped) => true,
-            Ok(FailOutcome::Requeued) => false,
-            Err(mark_err) => {
-                let _ = crate::daemon::append_log(&format!("queue fail error: {mark_err}"));
-                false
-            }
-        },
+        Ok(Ok(())) => mark_complete_finished(store, id),
+        Ok(Err(err)) => mark_failed_finished(store, id, &err.to_string()),
+        Err(_) => mark_failed_finished(store, id, "background task panicked"),
     };
 
     if finished {
         maybe_reschedule(queue, &task.kind, interval);
+    }
+}
+
+fn mark_complete_finished(store: &Arc<dyn QueueStore>, id: TaskId) -> bool {
+    match store.mark_complete(id) {
+        Ok(()) => true,
+        Err(err) => {
+            let _ = crate::daemon::append_log(&format!("queue complete error: {err}"));
+            false
+        }
+    }
+}
+
+fn mark_failed_finished(store: &Arc<dyn QueueStore>, id: TaskId, reason: &str) -> bool {
+    match store.mark_failed(id, reason) {
+        Ok(FailOutcome::Dropped) => true,
+        Ok(FailOutcome::Requeued) => false,
+        Err(err) => {
+            let _ = crate::daemon::append_log(&format!("queue fail error: {err}"));
+            false
+        }
     }
 }
 

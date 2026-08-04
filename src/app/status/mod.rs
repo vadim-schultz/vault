@@ -13,8 +13,7 @@ use crate::registry::{VaultEntry, VaultRegistry};
 use crate::storage::housekeeping;
 
 pub use model::{
-    DaemonStatus, QueueStatus, QueueTaskStatus, StatusReport, VaultHousekeepingStatus,
-    VaultStatus,
+    DaemonStatus, QueueStatus, QueueTaskStatus, StatusReport, VaultHousekeepingStatus, VaultStatus,
 };
 
 /// Build the current status report (read-only — does not prune registry).

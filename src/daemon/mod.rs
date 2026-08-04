@@ -23,7 +23,7 @@ use crate::registry::VaultRegistry;
 use crate::watcher;
 
 pub use guard::DaemonGuard;
-pub use heartbeat::{read_heartbeat, DaemonHeartbeat, is_running};
+pub use heartbeat::{is_running, read_heartbeat, DaemonHeartbeat};
 pub use queue_snapshot::{read_queue_snapshot, QueueSnapshot, QueueTaskSnapshot};
 
 /// Run the daemon in the foreground until interrupted or the watcher exits.

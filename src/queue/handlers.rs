@@ -38,18 +38,40 @@ pub fn reconcile_walk(vault_root: &Path) -> Result<(), VaultError> {
     let tracked = index.list_tracked_files()?;
     let tracked_paths: HashSet<_> = tracked.iter().map(|t| t.path.as_str()).collect();
 
-    let untracked_on_disk = disk_paths.difference(&tracked_paths).count();
-    let missing_on_disk = tracked_paths.difference(&disk_paths).count();
-    let mismatch_count = untracked_on_disk + missing_on_disk;
-
-    if mismatch_count > 0 {
-        daemon::append_log(&format!(
-            "reconcile_walk {}: {mismatch_count} file(s) mismatch \
-             ({untracked_on_disk} untracked on disk, {missing_on_disk} missing on disk)",
-            vault_root.display(),
-        ))?;
+    let (mismatch_count, untracked_on_disk, missing_on_disk) =
+        mismatch_counts(&disk_paths, &tracked_paths);
+    if mismatch_count == 0 {
+        return Ok(());
     }
-    Ok(())
+    log_mismatch(
+        vault_root,
+        mismatch_count,
+        untracked_on_disk,
+        missing_on_disk,
+    )
+}
+
+fn mismatch_counts(
+    disk_paths: &HashSet<&str>,
+    tracked_paths: &HashSet<&str>,
+) -> (usize, usize, usize) {
+    let untracked_on_disk = disk_paths.difference(tracked_paths).count();
+    let missing_on_disk = tracked_paths.difference(disk_paths).count();
+    let mismatch_count = untracked_on_disk + missing_on_disk;
+    (mismatch_count, untracked_on_disk, missing_on_disk)
+}
+
+fn log_mismatch(
+    vault_root: &Path,
+    mismatch_count: usize,
+    untracked_on_disk: usize,
+    missing_on_disk: usize,
+) -> Result<(), VaultError> {
+    daemon::append_log(&format!(
+        "reconcile_walk {}: {mismatch_count} file(s) mismatch \
+         ({untracked_on_disk} untracked on disk, {missing_on_disk} missing on disk)",
+        vault_root.display(),
+    ))
 }
 
 /// Check git housekeeping thresholds and repack when due.
@@ -61,19 +83,27 @@ pub fn git_housekeeping(vault_root: &Path) -> Result<(), VaultError> {
     let layout = VaultLayout::from_worktree(vault_root.to_path_buf());
     let config = VaultConfig::load(&layout.config_path())?;
     let status = crate::storage::housekeeping::maybe_run(&layout, &config.gc)?;
-    if status.repack_ran {
-        let reclaimed = status.last_repack.as_ref().map_or(0, |record| {
-            record.bytes_before.saturating_sub(record.bytes_after)
-        });
-        daemon::append_log(&format!(
-            "git_housekeeping {}: repacked {} objects, removed {} loose files, reclaimed {} bytes",
-            vault_root.display(),
-            status.last_repack.as_ref().map_or(0, |r| r.objects_packed),
-            status.last_repack.as_ref().map_or(0, |r| r.loose_removed),
-            reclaimed,
-        ))?;
+    if !status.repack_ran {
+        return Ok(());
+    }
+    if let Some(record) = status.last_repack.as_ref() {
+        log_repack(vault_root, record)?;
     }
     Ok(())
+}
+
+fn log_repack(
+    vault_root: &Path,
+    record: &crate::storage::housekeeping::RepackRecord,
+) -> Result<(), VaultError> {
+    let reclaimed = record.bytes_before.saturating_sub(record.bytes_after);
+    daemon::append_log(&format!(
+        "git_housekeeping {}: repacked {} objects, removed {} loose files, reclaimed {} bytes",
+        vault_root.display(),
+        record.objects_packed,
+        record.loose_removed,
+        reclaimed,
+    ))
 }
 
 #[cfg(test)]
