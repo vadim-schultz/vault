@@ -1,21 +1,11 @@
-//! `vault status` command.
+//! `vault status` command rendering.
 
 use std::fmt;
 
-use anyhow::Result;
-
 use crate::app::status::{
-    self, DaemonStatus, QueueStatus, StatusReport, VaultHousekeepingStatus, VaultStatus,
+    DaemonStatus, QueueStatus, StatusReport, VaultHousekeepingStatus, VaultStatus,
 };
-use crate::cli::support::run_blocking;
 use crate::ports::ServiceState;
-
-/// Run `vault status`.
-pub async fn run() -> Result<()> {
-    let report = run_blocking(status::report_default).await?;
-    println!("{report}");
-    Ok(())
-}
 
 impl fmt::Display for DaemonStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -125,6 +115,7 @@ fn service_state_label(state: ServiceState) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::status;
 
     #[test]
     fn status_renders_service_state() {

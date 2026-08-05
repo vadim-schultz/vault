@@ -95,13 +95,17 @@ fn default_state_dir() -> Result<PathBuf, VaultError> {
         .ok_or(VaultError::StateDirUnresolved)
 }
 
+fn state_file(name: &str) -> Result<PathBuf, VaultError> {
+    Ok(state_dir()?.join(name))
+}
+
 /// Return the path to `registry.toml`.
 ///
 /// # Errors
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn registry_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(REGISTRY_FILE))
+    state_file(REGISTRY_FILE)
 }
 
 /// Return the path to `registry.lock`.
@@ -110,7 +114,7 @@ pub fn registry_path() -> Result<PathBuf, VaultError> {
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn registry_lock_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(REGISTRY_LOCK))
+    state_file(REGISTRY_LOCK)
 }
 
 /// Return the path to `daemon.lock`.
@@ -119,7 +123,7 @@ pub fn registry_lock_path() -> Result<PathBuf, VaultError> {
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn daemon_lock_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(DAEMON_LOCK))
+    state_file(DAEMON_LOCK)
 }
 
 /// Return the path to `daemon.json`.
@@ -128,7 +132,7 @@ pub fn daemon_lock_path() -> Result<PathBuf, VaultError> {
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn daemon_heartbeat_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(DAEMON_HEARTBEAT))
+    state_file(DAEMON_HEARTBEAT)
 }
 
 /// Return the path to `queue.json`.
@@ -137,7 +141,7 @@ pub fn daemon_heartbeat_path() -> Result<PathBuf, VaultError> {
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn daemon_queue_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(DAEMON_QUEUE))
+    state_file(DAEMON_QUEUE)
 }
 
 /// Return the path to `daemon.log`.
@@ -146,7 +150,7 @@ pub fn daemon_queue_path() -> Result<PathBuf, VaultError> {
 ///
 /// Returns [`VaultError::Io`] when the state directory cannot be resolved.
 pub fn daemon_log_path() -> Result<PathBuf, VaultError> {
-    Ok(state_dir()?.join(DAEMON_LOG))
+    state_file(DAEMON_LOG)
 }
 
 /// Resolve worktree and `.vault/` paths for initialization.

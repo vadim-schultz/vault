@@ -1,6 +1,6 @@
 //! `vault status` use-case (read-only).
 
-use std::path::PathBuf;
+mod model;
 
 use chrono::{DateTime, Utc};
 
@@ -8,79 +8,13 @@ use crate::adapters::TomlRegistry;
 use crate::daemon::{self, DaemonHeartbeat, QueueSnapshot};
 use crate::domain::VaultLayout;
 use crate::error::VaultError;
-use crate::ports::{RegistryStore, ServiceManager, ServiceState};
+use crate::ports::{RegistryStore, ServiceManager};
 use crate::registry::{VaultEntry, VaultRegistry};
-use crate::storage::housekeeping::{self, RepackRecord};
+use crate::storage::housekeeping;
 
-/// Overall daemon status for display.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DaemonStatus {
-    /// Whether the daemon lock/heartbeat indicate a running process.
-    pub running: bool,
-    /// Service manager state, if any.
-    pub service_state: ServiceState,
-    /// Latest heartbeat payload.
-    pub heartbeat: Option<DaemonHeartbeat>,
-    /// Seconds since the last heartbeat update.
-    pub heartbeat_age_secs: Option<i64>,
-}
-
-/// Per-vault git housekeeping status for display.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VaultHousekeepingStatus {
-    /// Live loose/pack counts from the object store.
-    pub counts: housekeeping::ObjectCounts,
-    /// Last repack record from `.vault/housekeeping.json`, if any.
-    pub last_repack: Option<RepackRecord>,
-}
-
-/// Per-vault status line.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VaultStatus {
-    /// Vault worktree root.
-    pub root: PathBuf,
-    /// Registration timestamp.
-    pub registered_at: String,
-    /// Last snapshot timestamp from `meta.db`.
-    pub last_snapshot: Option<String>,
-    /// Whether the vault root still exists.
-    pub root_exists: bool,
-    /// Git housekeeping counts and last-repack history.
-    pub housekeeping: Option<VaultHousekeepingStatus>,
-}
-
-/// Background work-queue status from `queue.json`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueueStatus {
-    /// When the snapshot was written.
-    pub updated_at: String,
-    /// Pending tasks in FIFO order.
-    pub tasks: Vec<QueueTaskStatus>,
-}
-
-/// One pending task in the queue snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct QueueTaskStatus {
-    /// Task identifier.
-    pub id: u64,
-    /// Stable task kind name.
-    pub kind: String,
-    /// Scheduling lane.
-    pub lane: String,
-    /// Claim attempt count.
-    pub attempts: u32,
-}
-
-/// Full status report.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatusReport {
-    /// Daemon subsection.
-    pub daemon: DaemonStatus,
-    /// Background work queue, when the daemon has written a snapshot.
-    pub queue: Option<QueueStatus>,
-    /// Registered vaults.
-    pub vaults: Vec<VaultStatus>,
-}
+pub use model::{
+    DaemonStatus, QueueStatus, QueueTaskStatus, StatusReport, VaultHousekeepingStatus, VaultStatus,
+};
 
 /// Build the current status report (read-only — does not prune registry).
 ///
@@ -108,7 +42,7 @@ pub fn report(
 ///
 /// Returns [`VaultError`] when registry or vault metadata cannot be read.
 pub fn report_default() -> Result<StatusReport, VaultError> {
-    let service: Box<dyn ServiceManager> = if crate::paths::skip_service() {
+    let service: Box<dyn crate::ports::ServiceManager> = if crate::paths::skip_service() {
         Box::new(crate::adapters::NoopService)
     } else if crate::adapters::SystemdService::is_available() {
         Box::new(crate::adapters::SystemdService)
@@ -118,7 +52,7 @@ pub fn report_default() -> Result<StatusReport, VaultError> {
     report(&TomlRegistry, service.as_ref())
 }
 
-fn collect_daemon_status(service: &dyn ServiceManager) -> DaemonStatus {
+fn collect_daemon_status(service: &dyn crate::ports::ServiceManager) -> DaemonStatus {
     let heartbeat = daemon::read_heartbeat();
     DaemonStatus {
         running: daemon::is_running(),
@@ -167,22 +101,27 @@ fn collect_vault_statuses(registry: &VaultRegistry) -> Result<Vec<VaultStatus>, 
 
 fn vault_status_for_entry(entry: &VaultEntry) -> Result<VaultStatus, VaultError> {
     let layout = VaultLayout::from_worktree(entry.root.clone());
-    let housekeeping = if entry.root.is_dir() && layout.meta_db_path().is_file() {
-        let status = housekeeping::status_for(&layout)?;
-        Some(VaultHousekeepingStatus {
-            counts: status.counts,
-            last_repack: status.last_repack,
-        })
-    } else {
-        None
-    };
     Ok(VaultStatus {
         root: entry.root.clone(),
         registered_at: entry.registered_at.to_rfc3339(),
         last_snapshot: last_snapshot_for(&layout)?,
         root_exists: entry.root.is_dir(),
-        housekeeping,
+        housekeeping: housekeeping_status_for(entry, &layout)?,
     })
+}
+
+fn housekeeping_status_for(
+    entry: &VaultEntry,
+    layout: &VaultLayout,
+) -> Result<Option<VaultHousekeepingStatus>, VaultError> {
+    if !entry.root.is_dir() || !layout.meta_db_path().is_file() {
+        return Ok(None);
+    }
+    let status = housekeeping::status_for(layout)?;
+    Ok(Some(VaultHousekeepingStatus {
+        counts: status.counts,
+        last_repack: status.last_repack,
+    }))
 }
 
 fn last_snapshot_for(layout: &VaultLayout) -> Result<Option<String>, VaultError> {

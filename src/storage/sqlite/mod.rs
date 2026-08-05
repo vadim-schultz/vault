@@ -3,7 +3,7 @@
 mod queries;
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use rusqlite::{params, Connection};
 
@@ -20,6 +20,10 @@ pub struct MetaDb {
 }
 
 impl MetaDb {
+    fn conn(&self) -> Result<MutexGuard<'_, Connection>, VaultError> {
+        self.conn.lock().map_err(|_| VaultError::TaskPanicked)
+    }
+
     /// Open or create `meta.db` and apply schema when missing.
     ///
     /// # Errors
@@ -48,7 +52,7 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the insert fails.
     pub fn insert_snapshot(&self, record: &SnapshotRecord) -> Result<(), VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let tx = conn.unchecked_transaction()?;
         tx.execute(
             queries::INSERT_SNAPSHOT,
@@ -71,7 +75,7 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the query fails.
     pub fn snapshot_count(&self) -> Result<i64, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let count: i64 = conn.query_row(queries::COUNT_SNAPSHOTS, [], |row| row.get(0))?;
         Ok(count)
     }
@@ -82,15 +86,11 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the query fails.
     pub fn last_snapshot_time(&self) -> Result<Option<String>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let result = conn.query_row(queries::SELECT_LAST_SNAPSHOT_TIME, [], |row| {
             row.get::<_, String>(0)
         });
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        optional_row(result)
     }
 
     /// Return file events for the latest snapshot matching `path`, if any.
@@ -99,17 +99,13 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the query fails.
     pub fn latest_event_type(&self, file_path: &str) -> Result<Option<String>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let result = conn.query_row(
             queries::SELECT_LATEST_EVENT_TYPE,
             params![file_path],
             |row| row.get::<_, String>(0),
         );
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        optional_row(result)
     }
 
     /// Return the latest commit SHA at or before `at`.
@@ -118,15 +114,11 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the query fails.
     pub fn resolve_at(&self, at: &str) -> Result<Option<String>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let result = conn.query_row(queries::SELECT_COMMIT_AT_OR_BEFORE, params![at], |row| {
             row.get::<_, String>(0)
         });
-        match result {
-            Ok(value) => Ok(Some(value)),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-            Err(err) => Err(err.into()),
-        }
+        optional_row(result)
     }
 
     /// List snapshots, optionally scoped to a path, newest first.
@@ -145,7 +137,7 @@ impl MetaDb {
     }
 
     fn list_all_snapshots(&self) -> Result<Vec<(String, String, Option<String>)>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let mut stmt = conn.prepare(queries::SELECT_ALL_SNAPSHOTS)?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, None)))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -155,7 +147,7 @@ impl MetaDb {
         &self,
         path: &str,
     ) -> Result<Vec<(String, String, Option<String>)>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let mut stmt = conn.prepare(queries::SELECT_SNAPSHOTS_FOR_PATH)?;
         let rows = stmt.query_map(params![path], |row| {
             Ok((row.get(0)?, row.get(1)?, Some(row.get(2)?)))
@@ -169,10 +161,18 @@ impl MetaDb {
     ///
     /// Returns [`VaultError`] when the query fails.
     pub fn list_tracked_files(&self) -> Result<Vec<(String, String)>, VaultError> {
-        let conn = self.conn.lock().map_err(|_| VaultError::TaskPanicked)?;
+        let conn = self.conn()?;
         let mut stmt = conn.prepare(queries::SELECT_TRACKED_FILES)?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+}
+
+fn optional_row<T>(result: rusqlite::Result<T>) -> Result<Option<T>, VaultError> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(err) => Err(err.into()),
     }
 }
 

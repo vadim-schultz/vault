@@ -1,41 +1,17 @@
 //! Git object store via gix (no `git` CLI).
 
+mod tree_edit;
+mod worktree_cwd;
+
 use std::path::{Path, PathBuf};
 
 use gix::create::{into as create_repo, Kind, Options};
-use gix::object::tree::EntryKind;
 
-use crate::domain::{FileChange, FileEventKind};
+use crate::domain::FileChange;
 use crate::error::VaultError;
 
-/// Saves the process cwd on entry and restores it on drop; uses `worktree` when cwd is unavailable.
-struct WorktreeCwd<'a> {
-    restore: Option<PathBuf>,
-    _worktree: &'a Path,
-}
-
-impl<'a> WorktreeCwd<'a> {
-    fn enter(worktree: &'a Path) -> Result<Self, VaultError> {
-        let restore = if let Ok(current) = std::env::current_dir() {
-            Some(current)
-        } else {
-            std::env::set_current_dir(worktree)?;
-            None
-        };
-        Ok(Self {
-            restore,
-            _worktree: worktree,
-        })
-    }
-}
-
-impl Drop for WorktreeCwd<'_> {
-    fn drop(&mut self) {
-        if let Some(dir) = self.restore.take() {
-            let _ = std::env::set_current_dir(dir);
-        }
-    }
-}
+use tree_edit::{apply_tree_changes, TreeEditContext};
+use worktree_cwd::WorktreeCwd;
 
 type GitStoreHandler = fn(&Path, &Path) -> Result<GitStore, VaultError>;
 
@@ -63,63 +39,6 @@ fn open_existing_store(git_dir: &Path, worktree: &Path) -> Result<GitStore, Vaul
         git_dir: git_dir.to_path_buf(),
         worktree: worktree.to_path_buf(),
     })
-}
-
-/// Inputs shared by tree-edit handlers.
-struct TreeEditContext<'a> {
-    repo: &'a gix::Repository,
-    worktree: &'a Path,
-}
-
-type TreeChangeHandler = fn(
-    &TreeEditContext<'_>,
-    &mut gix::object::tree::Editor<'_>,
-    &FileChange,
-) -> Result<(), VaultError>;
-
-fn tree_handler_for(kind: FileEventKind) -> TreeChangeHandler {
-    match kind {
-        FileEventKind::Create | FileEventKind::Modify | FileEventKind::Restore => {
-            upsert_blob_in_tree
-        }
-        FileEventKind::Delete => remove_path_from_tree,
-    }
-}
-
-fn apply_tree_changes(
-    ctx: &TreeEditContext<'_>,
-    editor: &mut gix::object::tree::Editor<'_>,
-    changes: &[FileChange],
-) -> Result<(), VaultError> {
-    for change in changes {
-        tree_handler_for(change.kind)(ctx, editor, change)?;
-    }
-    Ok(())
-}
-
-fn upsert_blob_in_tree(
-    ctx: &TreeEditContext<'_>,
-    editor: &mut gix::object::tree::Editor<'_>,
-    change: &FileChange,
-) -> Result<(), VaultError> {
-    let abs = ctx.worktree.join(change.rel.to_path());
-    let data = std::fs::read(&abs).map_err(VaultError::Io)?;
-    let oid = ctx.repo.write_blob(&data).map_err(VaultError::git)?;
-    editor
-        .upsert(change.rel.as_str(), EntryKind::Blob, oid)
-        .map_err(VaultError::git)?;
-    Ok(())
-}
-
-fn remove_path_from_tree(
-    _ctx: &TreeEditContext<'_>,
-    editor: &mut gix::object::tree::Editor<'_>,
-    change: &FileChange,
-) -> Result<(), VaultError> {
-    editor
-        .remove(change.rel.as_str())
-        .map_err(VaultError::git)?;
-    Ok(())
 }
 
 /// Handle to the vault's separated git-dir and worktree.
@@ -244,13 +163,7 @@ impl GitStore {
         };
         Self::read_entry(&tree, path)
     }
-}
 
-fn parse_commit_id(commit_sha: &str) -> Option<gix::ObjectId> {
-    gix::ObjectId::from_hex(commit_sha.as_bytes()).ok()
-}
-
-impl GitStore {
     fn find_commit_tree(
         &self,
         commit_id: gix::ObjectId,
@@ -274,6 +187,10 @@ impl GitStore {
         let object = entry.object().map_err(VaultError::git)?;
         Ok(Some(object.data.clone()))
     }
+}
+
+fn parse_commit_id(commit_sha: &str) -> Option<gix::ObjectId> {
+    gix::ObjectId::from_hex(commit_sha.as_bytes()).ok()
 }
 
 /// Initialize a bare git repository at `git_dir` with external `worktree`.

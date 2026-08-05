@@ -41,14 +41,15 @@ src/
 
 | Port | Role | Production adapter | Test fake |
 |------|------|-------------------|-----------|
-| `ObjectStore` | commit trees, read blobs at a commit | `GixObjectStore` | `InMemoryObjectStore` |
-| `MetaIndex` | record snapshots, resolve `--at` dates | `SqliteMetaIndex` | `InMemoryMetaIndex` |
-| `RegistryStore` | global `registry.toml` | `TomlRegistry` | `InMemoryRegistry` |
+| `ObjectStore` | commit trees, read blobs at a commit | `GixObjectStore` | real `GixObjectStore` in tempdir |
+| `MetaIndex` | record snapshots, resolve `--at` dates | `SqliteMetaIndex` | real `SqliteMetaIndex` in tempdir |
+| `RegistryStore` | global `registry.toml` | `TomlRegistry` | real `TomlRegistry` + `VAULT_STATE_DIR` |
 | `ServiceManager` | start singleton daemon | `SystemdService` / `DetachedSpawnService` | `RecordingServiceManager` |
 | `Clock` | injectable wall clock | `SystemClock` | `FixedClock` |
 
-Use-cases receive `Arc<dyn Port>` — no generics at call sites. Fakes live in `adapters/fakes/`
-behind `#[cfg(any(test, feature = "testing"))]`.
+Use-cases receive `Arc<dyn Port>` — no generics at call sites. `adapters/fakes/` holds only
+`FixedClock` and `RecordingServiceManager`; storage and registry ports are tested against
+production adapters in tempdirs, behind `#[cfg(any(test, feature = "testing"))]`.
 
 ## Composition root
 

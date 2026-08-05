@@ -41,6 +41,8 @@
 
 ### Changed
 
+* Drop `InMemoryMetaIndex`, `InMemoryObjectStore`, and `InMemoryRegistry` test fakes; affected unit tests now use real `SqliteMetaIndex`, `GixObjectStore`, and `TomlRegistry` in tempdirs.
+* Shape refactor — split oversized modules into focused subdirectories following Sandi Metz sizing rules: `storage/housekeeping/{fs,marker,repack}`, `app/status/model`, `adapters/fakes/*`, `daemon/{guard,heartbeat,queue_snapshot}`, `config/{watcher,gc}`, `storage/git/{worktree_cwd,tree_edit}`, `cli/commands/status/render`. Extracted shared helpers in `queue`, `handlers`, `watcher`, `sqlite`, and `paths` to eliminate duplicated match/lock/path boilerplate. No behavior change.
 * Restructured the crate into `domain/`, `ports/`, `adapters/`, and `app/` use-cases with injected trait objects.
 * `vault status` is read-only — registry pruning moved to daemon reload (`PruneRegistry` use-case).
 * Watcher routing is a single pass; ignore patterns are applied once in the router.

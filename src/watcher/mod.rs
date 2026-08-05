@@ -157,12 +157,30 @@ async fn process_paths(
     abs_paths: Vec<PathBuf>,
     reload_tx: mpsc::UnboundedSender<()>,
 ) -> Result<(), VaultError> {
-    if abs_paths.iter().any(|p| is_registry_related(p)) {
-        let mut guard = state.lock().expect("lock");
-        guard.registry_mtime = None;
-        drop(guard);
-        let _ = reload_tx.send(());
+    signal_if_registry_related(&state, &abs_paths, &reload_tx);
+    commit_routed_batches(&state, abs_paths).await?;
+    signal_if_registry_changed(&state, &reload_tx);
+    Ok(())
+}
+
+fn signal_if_registry_related(
+    state: &Arc<Mutex<WatcherState>>,
+    abs_paths: &[PathBuf],
+    reload_tx: &mpsc::UnboundedSender<()>,
+) {
+    if !abs_paths.iter().any(|p| is_registry_related(p)) {
+        return;
     }
+    let mut guard = state.lock().expect("lock");
+    guard.registry_mtime = None;
+    drop(guard);
+    let _ = reload_tx.send(());
+}
+
+async fn commit_routed_batches(
+    state: &Arc<Mutex<WatcherState>>,
+    abs_paths: Vec<PathBuf>,
+) -> Result<(), VaultError> {
     let batches = {
         let guard = state.lock().expect("lock");
         guard.router.route(abs_paths)
@@ -172,6 +190,13 @@ async fn process_paths(
             .await
             .map_err(|_| VaultError::TaskPanicked)??;
     }
+    Ok(())
+}
+
+fn signal_if_registry_changed(
+    state: &Arc<Mutex<WatcherState>>,
+    reload_tx: &mpsc::UnboundedSender<()>,
+) {
     let changed = {
         let current = registry_mtime();
         let mut guard = state.lock().expect("lock");
@@ -179,10 +204,10 @@ async fn process_paths(
         guard.registry_mtime = current;
         previous != current
     };
-    if changed {
-        let _ = reload_tx.send(());
+    if !changed {
+        return;
     }
-    Ok(())
+    let _ = reload_tx.send(());
 }
 
 fn append_notify_error(err: &VaultError) -> Result<(), VaultError> {
