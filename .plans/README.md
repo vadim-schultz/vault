@@ -1,6 +1,7 @@
 # Vault implementation plans
 
-Two streams: the MVP bootstrap (landed) and ongoing benchmark / optimisation work.
+Three streams: the MVP bootstrap (landed), ongoing benchmark / optimisation work, and release
+build tuning.
 
 ## MVP bootstrap (complete)
 
@@ -24,3 +25,12 @@ Measurement results and proposed fixes:
 | [benches/optimize.plan.md](benches/optimize.plan.md) | Proposed bottleneck fixes (draft) |
 | [queue/README.md](queue/README.md) | Background work queue stream |
 | [queue/RESULTS.md](queue/RESULTS.md) | Enqueue vs sync reconcile_walk latency |
+
+## Release build tuning (active)
+
+Binary size and compilation profile — what ships, not what runs:
+
+| Document | Description |
+|----------|-------------|
+| [release/README.md](release/README.md) | Stream overview |
+| [release/binary_size.plan.md](release/binary_size.plan.md) | Measured profile-tuning + dependency-feature-trim proposals (draft) |
