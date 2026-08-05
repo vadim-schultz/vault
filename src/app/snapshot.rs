@@ -79,17 +79,37 @@ const fn verb_for(kind: crate::domain::FileEventKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
-    use crate::adapters::fakes::{FixedClock, InMemoryMetaIndex, InMemoryObjectStore};
+    use crate::adapters::fakes::FixedClock;
+    use crate::adapters::{GixObjectStore, SqliteMetaIndex};
+    use crate::config::VaultConfig;
     use crate::domain::{FileChange, FileEventKind, RelPath};
+    use crate::storage;
     use chrono::TimeZone;
+    use tempfile::TempDir;
+
+    fn init_vault(dir: &TempDir) -> VaultLayout {
+        let layout = VaultLayout::from_worktree(dir.path().to_path_buf());
+        fs::create_dir_all(&layout.vault_dir).expect("mkdir vault");
+        storage::git::init(&layout.git_dir_path(), &layout.worktree).expect("git init");
+        storage::sqlite::init_meta_db(&layout.meta_db_path()).expect("sqlite init");
+        VaultConfig::defaults()
+            .write_to(&layout.config_path())
+            .expect("write config");
+        fs::write(layout.readme_path(), b"test").expect("readme");
+        layout
+    }
 
     #[test]
     fn timestamp_comes_from_injected_clock() {
         let clock = FixedClock::at(chrono::Utc.with_ymd_and_hms(2026, 6, 1, 12, 0, 0).unwrap());
-        let object_store = InMemoryObjectStore::default();
-        let meta_index = InMemoryMetaIndex::default();
-        let layout = VaultLayout::from_worktree(std::env::temp_dir());
+        let dir = TempDir::new().expect("tempdir");
+        let layout = init_vault(&dir);
+        fs::write(layout.worktree.join("a.md"), b"a").expect("write");
+        let object_store = GixObjectStore::open(&layout).expect("git");
+        let meta_index = SqliteMetaIndex::open(layout.meta_db_path()).expect("meta");
         let changes = vec![FileChange {
             rel: RelPath::parse("a.md"),
             kind: FileEventKind::Create,

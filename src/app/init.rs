@@ -168,7 +168,7 @@ mod tests {
         let _guard = crate::daemon::DaemonGuard::acquire().expect("daemon lock");
         let recorder = Arc::new(RecordingServiceManager::default());
         let ctx = InitContext {
-            registry: Arc::new(crate::adapters::fakes::InMemoryRegistry::default()),
+            registry: Arc::new(TomlRegistry),
             service: recorder.clone(),
         };
         start_watching(&ctx).expect("start watching");
