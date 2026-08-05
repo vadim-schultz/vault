@@ -282,7 +282,8 @@ echo "ground truth before housekeeping:"
 git --git-dir="$VAULT_DIR/.git" count-objects -v
 echo "lowering [gc].loose_object_limit so the next check will repack"
 if grep -q '^\[gc\]' "$VAULT_DIR/config.toml"; then
-    sed -i '/^\[gc\]/,/^\[/ s/^loose_object_limit = .*/loose_object_limit = 5/' "$VAULT_DIR/config.toml"
+    sed -i.bak '/^\[gc\]/,/^\[/ s/^loose_object_limit = .*/loose_object_limit = 5/' "$VAULT_DIR/config.toml"
+    rm -f "$VAULT_DIR/config.toml.bak"
 else
     cat >>"$VAULT_DIR/config.toml" <<'EOF'
 
@@ -313,6 +314,18 @@ inspect_daemon_state
 wait_for "housekeeping repack" bash -c "[[ \$(git --git-dir='$VAULT_DIR/.git' count-objects -v | awk '/^count:/{print \$2}') -le 5 ]]"
 echo "ground truth after housekeeping:"
 git --git-dir="$VAULT_DIR/.git" count-objects -v
+vlt status
+pause
+
+section "15. File size limit — oversized files are skipped, but vault status says so"
+echo "writing a 11MB file (default max_file_bytes is 10MB)"
+dd if=/dev/zero of=huge.bin bs=1M count=11 2>/dev/null
+sleep "$DEBOUNCE_WAIT"
+echo "huge.bin was never committed -- confirm it's absent from list and the git tree:"
+vlt list
+inspect_git
+echo ""
+echo "vault status enumerates it instead of staying silent about the skip:"
 vlt status
 pause
 

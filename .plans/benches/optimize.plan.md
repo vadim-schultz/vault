@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: opt-filesize-warning
     content: "File size (dimension 3): surface a visible signal (log line, vault status entry, or both) when a file is skipped for exceeding max_file_bytes, instead of the current silent drop"
-    status: pending
+    status: completed
   - id: opt-vault-count-reload
     content: "Vault count (dimension 5): make Router::from_registry incremental (reload only vaults whose config/ignore actually changed) instead of reloading every registered vault on every hot-reload tick — 129ms at 2,000 vaults today"
     status: pending

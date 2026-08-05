@@ -9,6 +9,7 @@ a separate review pass.
 | [RESULTS.md](RESULTS.md) | Measured knee points and verdicts from criterion benches + stress scripts |
 | [optimize.plan.md](optimize.plan.md) | Proposed fixes for every "needs limit" / "needs fix" verdict (draft, pending review) |
 | [history_index.plan.md](history_index.plan.md) | Dimension 1 implementation chapter — index + `SELECT_TRACKED_FILES` rewrite (complete) |
+| [filesize_warning.plan.md](filesize_warning.plan.md) | Dimension 3 implementation chapter — `vault status` oversized-file visibility (complete) |
 
 **Harness code:** `benches/*.rs` (criterion), `scripts/stress/*.sh` (daemon + real filesystem),
 `examples/simulate_history.rs`. Manual profiling tools — not wired into default CI.

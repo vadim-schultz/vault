@@ -107,6 +107,7 @@ fn vault_status_for_entry(entry: &VaultEntry) -> Result<VaultStatus, VaultError>
         last_snapshot: last_snapshot_for(&layout)?,
         root_exists: entry.root.is_dir(),
         housekeeping: housekeeping_status_for(entry, &layout)?,
+        oversized: oversized_for(entry, &layout)?,
     })
 }
 
@@ -124,11 +125,91 @@ fn housekeeping_status_for(
     }))
 }
 
+fn oversized_for(
+    entry: &VaultEntry,
+    layout: &VaultLayout,
+) -> Result<Vec<crate::domain::RelPath>, VaultError> {
+    if !entry.root.is_dir() {
+        return Ok(vec![]);
+    }
+    let config = crate::config::VaultConfig::load(&layout.config_path())?;
+    crate::walk::collect_oversized(layout, &config)
+}
+
 fn last_snapshot_for(layout: &VaultLayout) -> Result<Option<String>, VaultError> {
     let meta_db = layout.meta_db_path();
     if meta_db.is_file() {
         crate::storage::sqlite::last_snapshot_time(&meta_db)
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::config::VaultConfig;
+    use chrono::Utc;
+    use tempfile::TempDir;
+
+    fn entry_for(dir: &TempDir) -> VaultEntry {
+        VaultEntry {
+            root: dir.path().to_path_buf(),
+            registered_at: Utc::now(),
+            enabled: true,
+        }
+    }
+
+    fn init_vault(dir: &TempDir, max_file_bytes: u64) -> VaultLayout {
+        let layout = VaultLayout::from_worktree(dir.path().to_path_buf());
+        fs::create_dir_all(&layout.vault_dir).expect("mkdir vault");
+        let mut config = VaultConfig::defaults();
+        config.watcher.max_file_bytes = max_file_bytes;
+        config
+            .write_to(&layout.config_path())
+            .expect("write config");
+        layout
+    }
+
+    #[test]
+    fn oversized_for_lists_file_over_the_limit() {
+        let dir = TempDir::new().expect("tempdir");
+        let layout = init_vault(&dir, 10);
+        fs::write(dir.path().join("big.bin"), vec![0_u8; 20]).expect("write big");
+        let entry = entry_for(&dir);
+
+        let oversized = oversized_for(&entry, &layout).expect("oversized");
+
+        let rels: Vec<_> = oversized
+            .iter()
+            .map(crate::domain::RelPath::as_str)
+            .collect();
+        assert_eq!(rels, vec!["big.bin"]);
+    }
+
+    #[test]
+    fn oversized_for_empty_when_none_over_the_limit() {
+        let dir = TempDir::new().expect("tempdir");
+        let layout = init_vault(&dir, 10);
+        fs::write(dir.path().join("small.md"), b"ok").expect("write small");
+        let entry = entry_for(&dir);
+
+        let oversized = oversized_for(&entry, &layout).expect("oversized");
+
+        assert!(oversized.is_empty());
+    }
+
+    #[test]
+    fn oversized_for_empty_when_root_missing() {
+        let dir = TempDir::new().expect("tempdir");
+        let layout = init_vault(&dir, 10);
+        let entry = entry_for(&dir);
+        fs::remove_dir_all(dir.path()).expect("remove root");
+
+        let oversized = oversized_for(&entry, &layout).expect("oversized");
+
+        assert!(oversized.is_empty());
     }
 }
