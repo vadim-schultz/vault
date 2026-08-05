@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use crate::daemon::DaemonHeartbeat;
+use crate::domain::RelPath;
 use crate::ports::ServiceState;
 use crate::storage::housekeeping::{self, RepackRecord};
 
@@ -41,6 +42,8 @@ pub struct VaultStatus {
     pub root_exists: bool,
     /// Git housekeeping counts and last-repack history.
     pub housekeeping: Option<VaultHousekeepingStatus>,
+    /// Files currently over `max_file_bytes`, excluded from every snapshot.
+    pub oversized: Vec<RelPath>,
 }
 
 /// Background work-queue status from `queue.json`.

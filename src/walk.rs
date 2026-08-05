@@ -1,10 +1,19 @@
 //! Walk vault worktrees to collect baseline file paths.
 
+use std::path::Path;
+
 use crate::config::VaultConfig;
 use crate::domain::{FileChange, FileEventKind, RelPath, VaultLayout};
 use crate::error::VaultError;
 use crate::ignore::{exceeds_max_bytes, IgnoreMatcher};
 use walkdir::{DirEntry, WalkDir};
+
+/// Shared per-walk context: worktree root, ignore matcher, and size ceiling.
+struct WalkParams<'a> {
+    worktree: &'a Path,
+    matcher: &'a IgnoreMatcher,
+    max_file_bytes: u64,
+}
 
 /// Collect non-ignored files under `layout` for a baseline snapshot.
 ///
@@ -16,25 +25,45 @@ pub fn collect_baseline_changes(
     config: &VaultConfig,
 ) -> Result<Vec<FileChange>, VaultError> {
     let matcher = IgnoreMatcher::from_config(config)?;
+    let params = WalkParams {
+        worktree: &layout.worktree,
+        matcher: &matcher,
+        max_file_bytes: config.watcher.max_file_bytes,
+    };
     let mut changes = Vec::new();
     for root in &config.watch_roots {
         let watch_root = layout.worktree.join(root);
-        collect_from_watch_root(
-            &watch_root,
-            &layout.worktree,
-            &matcher,
-            config.watcher.max_file_bytes,
-            &mut changes,
-        )?;
+        collect_from_watch_root(&watch_root, &params, &mut changes)?;
     }
     Ok(changes)
 }
 
+/// Collect files over `config`'s size ceiling that are otherwise trackable.
+///
+/// # Errors
+///
+/// Returns [`VaultError`] when walking fails.
+pub fn collect_oversized(
+    layout: &VaultLayout,
+    config: &VaultConfig,
+) -> Result<Vec<RelPath>, VaultError> {
+    let matcher = IgnoreMatcher::from_config(config)?;
+    let params = WalkParams {
+        worktree: &layout.worktree,
+        matcher: &matcher,
+        max_file_bytes: config.watcher.max_file_bytes,
+    };
+    let mut oversized = Vec::new();
+    for root in &config.watch_roots {
+        let watch_root = layout.worktree.join(root);
+        collect_oversized_from_root(&watch_root, &params, &mut oversized)?;
+    }
+    Ok(oversized)
+}
+
 fn collect_from_watch_root(
-    watch_root: &std::path::Path,
-    worktree: &std::path::Path,
-    matcher: &IgnoreMatcher,
-    max_file_bytes: u64,
+    watch_root: &Path,
+    params: &WalkParams<'_>,
     changes: &mut Vec<FileChange>,
 ) -> Result<(), VaultError> {
     if !watch_root.is_dir() {
@@ -42,7 +71,7 @@ fn collect_from_watch_root(
     }
     for entry in WalkDir::new(watch_root).follow_links(false) {
         let entry = entry.map_err(|e| VaultError::Io(e.into()))?;
-        if let Some(change) = file_change_from_entry(&entry, worktree, matcher, max_file_bytes)? {
+        if let Some(change) = file_change_from_entry(&entry, params)? {
             changes.push(change);
         }
     }
@@ -51,22 +80,52 @@ fn collect_from_watch_root(
 
 fn file_change_from_entry(
     entry: &DirEntry,
-    worktree: &std::path::Path,
-    matcher: &IgnoreMatcher,
-    max_file_bytes: u64,
+    params: &WalkParams<'_>,
 ) -> Result<Option<FileChange>, VaultError> {
     if !entry.file_type().is_file() {
         return Ok(None);
     }
     let abs = entry.path();
-    let rel = RelPath::from_worktree(worktree, abs)?;
-    if matcher.is_ignored(&rel) || exceeds_max_bytes(abs, max_file_bytes)? {
+    let rel = RelPath::from_worktree(params.worktree, abs)?;
+    if params.matcher.is_ignored(&rel) || exceeds_max_bytes(abs, params.max_file_bytes)? {
         return Ok(None);
     }
     Ok(Some(FileChange {
         rel,
         kind: FileEventKind::Create,
     }))
+}
+
+fn collect_oversized_from_root(
+    watch_root: &Path,
+    params: &WalkParams<'_>,
+    oversized: &mut Vec<RelPath>,
+) -> Result<(), VaultError> {
+    if !watch_root.is_dir() {
+        return Ok(());
+    }
+    for entry in WalkDir::new(watch_root).follow_links(false) {
+        let entry = entry.map_err(|e| VaultError::Io(e.into()))?;
+        if let Some(rel) = oversized_entry(&entry, params)? {
+            oversized.push(rel);
+        }
+    }
+    Ok(())
+}
+
+fn oversized_entry(
+    entry: &DirEntry,
+    params: &WalkParams<'_>,
+) -> Result<Option<RelPath>, VaultError> {
+    if !entry.file_type().is_file() {
+        return Ok(None);
+    }
+    let abs = entry.path();
+    let rel = RelPath::from_worktree(params.worktree, abs)?;
+    if params.matcher.is_ignored(&rel) || !exceeds_max_bytes(abs, params.max_file_bytes)? {
+        return Ok(None);
+    }
+    Ok(Some(rel))
 }
 
 #[cfg(test)]
@@ -150,5 +209,44 @@ mod tests {
         let rels: Vec<_> = changes.iter().map(|c| c.rel.as_str()).collect();
         assert!(rels.contains(&"notes/a.md"));
         assert!(rels.contains(&"docs/b.md"));
+    }
+
+    #[test]
+    fn collect_oversized_finds_file_over_the_limit() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("big.bin"), vec![0_u8; 20]).expect("write big");
+        let mut config = VaultConfig::defaults();
+        config.watcher.max_file_bytes = 10;
+
+        let oversized = collect_oversized(&layout(&dir), &config).expect("collect");
+
+        let rels: Vec<_> = oversized.iter().map(RelPath::as_str).collect();
+        assert_eq!(rels, vec!["big.bin"]);
+    }
+
+    #[test]
+    fn collect_oversized_excludes_files_under_the_limit() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::write(dir.path().join("small.md"), b"ok").expect("write small");
+        let mut config = VaultConfig::defaults();
+        config.watcher.max_file_bytes = 10;
+
+        let oversized = collect_oversized(&layout(&dir), &config).expect("collect");
+
+        assert!(oversized.is_empty());
+    }
+
+    #[test]
+    fn collect_oversized_excludes_ignore_matched_files() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir_all(dir.path().join(".vault")).expect("mkdir .vault");
+        fs::write(dir.path().join(".vault").join("meta.db"), vec![0_u8; 20])
+            .expect("write big ignored");
+        let mut config = VaultConfig::defaults();
+        config.watcher.max_file_bytes = 10;
+
+        let oversized = collect_oversized(&layout(&dir), &config).expect("collect");
+
+        assert!(oversized.is_empty());
     }
 }

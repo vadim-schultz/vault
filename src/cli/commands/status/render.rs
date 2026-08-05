@@ -36,7 +36,13 @@ impl fmt::Display for VaultStatus {
             self.root.display()
         )?;
         if let Some(housekeeping) = &self.housekeeping {
-            write!(f, "    housekeeping: {housekeeping}")?;
+            writeln!(f, "    housekeeping: {housekeeping}")?;
+        }
+        if !self.oversized.is_empty() {
+            writeln!(f, "    oversized ({} not tracked):", self.oversized.len())?;
+            for path in &self.oversized {
+                writeln!(f, "      {}", path.as_str())?;
+            }
         }
         Ok(())
     }
@@ -127,6 +133,35 @@ mod tests {
         };
         let output = format!("{status}");
         assert!(output.contains("Service: unsupported"));
+    }
+
+    #[test]
+    fn vault_status_renders_oversized_block_when_non_empty() {
+        let status = VaultStatus {
+            root: std::path::PathBuf::from("/vault"),
+            registered_at: "2026-08-05T00:00:00Z".to_string(),
+            last_snapshot: None,
+            root_exists: true,
+            housekeeping: None,
+            oversized: vec![crate::domain::RelPath::parse("huge.bin")],
+        };
+        let output = format!("{status}");
+        assert!(output.contains("oversized (1 not tracked):"));
+        assert!(output.contains("huge.bin"));
+    }
+
+    #[test]
+    fn vault_status_omits_oversized_block_when_empty() {
+        let status = VaultStatus {
+            root: std::path::PathBuf::from("/vault"),
+            registered_at: "2026-08-05T00:00:00Z".to_string(),
+            last_snapshot: None,
+            root_exists: true,
+            housekeeping: None,
+            oversized: vec![],
+        };
+        let output = format!("{status}");
+        assert!(!output.contains("oversized"));
     }
 
     #[test]
