@@ -177,11 +177,13 @@ MVP accepts explicit timestamps only:
 
 | Format | Meaning |
 |--------|---------|
-| `YYYY-MM-DD` | Date; start of day UTC |
+| `YYYY-MM-DD` | Date; end of day, local timezone |
 | `YYYY-MM-DD HH:MM` | Date and time; local timezone |
 | RFC3339 (e.g. `2026-06-01T14:32:01+00:00`) | Exact timestamp, any offset |
 
-`vault log` prints exact RFC3339 timestamps, so its output round-trips directly back into
+A bare date is inclusive of that day's activity — `--at 2026-06-01` shows the latest snapshot
+taken on or before the end of June 1st, so same-day edits show up without needing to name the next
+day. `vault log` prints exact RFC3339 timestamps, so its output round-trips directly back into
 `--at`/`--to` — copy a line from `vault log` straight into `vault show --at`.
 
 Relative phrases (`2 weeks ago`, `yesterday`) are deferred to post-v0.1.

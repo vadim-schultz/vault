@@ -19,10 +19,11 @@ fn show_returns_content_at_or_before_date() {
 
     common::vault_bin()
         .current_dir(dir.path())
+        .env("TZ", "UTC")
         .args(["show", "doc.md", "--at", "2026-06-02"])
         .assert()
         .success()
-        .stdout("v1"); // 2026-06-02 UTC midnight resolves to the 06-01 09:00 commit
+        .stdout("v2"); // end of 2026-06-02 (UTC, pinned above) resolves to that day's own commit
 
     common::vault_bin()
         .current_dir(dir.path())
