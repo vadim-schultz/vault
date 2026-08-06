@@ -1,14 +1,18 @@
 //! Registry pruning use-case.
 
+use std::path::PathBuf;
+
 use crate::error::VaultError;
 use crate::ports::RegistryStore;
 
 /// Remove vault entries whose roots no longer exist on disk.
 ///
+/// Returns the roots that were removed.
+///
 /// # Errors
 ///
 /// Returns [`VaultError`] when registry load or save fails.
-pub fn prune(registry: &dyn RegistryStore) -> Result<usize, VaultError> {
+pub fn prune(registry: &dyn RegistryStore) -> Result<Vec<PathBuf>, VaultError> {
     registry.prune_stale()
 }
 
@@ -35,7 +39,10 @@ mod tests {
         });
         store.save(&registry).expect("save");
         let removed = prune(&store).expect("prune");
-        assert_eq!(removed, 1);
+        assert_eq!(
+            removed,
+            vec![std::path::PathBuf::from("/nonexistent/vault/root")]
+        );
         assert!(store.load().expect("load").vault.is_empty());
         std::env::remove_var(STATE_DIR_ENV);
     }

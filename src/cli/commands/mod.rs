@@ -6,6 +6,7 @@ pub mod ignore;
 pub mod init;
 pub mod list;
 pub mod log;
+pub mod prune;
 pub mod restore;
 pub mod show;
 pub mod status;

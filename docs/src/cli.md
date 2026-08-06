@@ -16,6 +16,7 @@ Command-line interface for the `vault` binary.
 |---------|--------|---------|
 | `init` | Implemented | 3 |
 | `status` | Implemented | 4 |
+| `prune` | Implemented | - |
 | `ignore PATTERN` | Implemented | 4 |
 | `show [PATH] --at DATE` | Implemented | 5 |
 | `restore PATH --at DATE [--dry-run]` | Implemented | 5 |
@@ -49,6 +50,26 @@ Report daemon health, registered vault count, and the last snapshot time for eac
 ```bash
 vault status
 ```
+
+### `vault prune`
+
+Remove registered vaults whose root directory no longer exists (e.g. a vault initialized in a
+temp directory that was later deleted). The background daemon already does this reactively when
+it reloads `registry.toml`, but only while it's running; `vault prune` triggers the same cleanup
+on demand — the equivalent of `git worktree prune` for vault's own registry.
+
+```bash
+vault prune
+```
+
+```
+Removed 2 missing vault(s):
+  /private/var/folders/vk/.../tmp.lo9YTvXOjT
+  /private/tmp/claude-502/vault-mvp-check
+```
+
+Prints `No missing vaults to prune.` when every registered root still exists. Only removes the
+registry entry — it never touches files under a still-existing root.
 
 ### `vault ignore`
 
@@ -204,4 +225,6 @@ Relative phrases (`2 weeks ago`, `yesterday`) are deferred to post-v0.1.
 
 ## Not in v0.1
 
-Multi-machine sync, encryption, retention/prune policies, launchd / Windows Task Scheduler adapters.
+Multi-machine sync, encryption, retention/prune policies, launchd / Windows Task Scheduler
+adapters. ("Retention/prune policies" here means pruning old *snapshots* within a vault's own
+history — unrelated to `vault prune`, which only cleans up the global registry of vault roots.)

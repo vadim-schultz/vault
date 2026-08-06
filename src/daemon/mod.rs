@@ -6,6 +6,7 @@ mod queue_snapshot;
 
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -126,6 +127,6 @@ pub fn spawn_detached() -> Result<(), VaultError> {
 /// # Errors
 ///
 /// Returns [`VaultError`] when registry load or save fails.
-pub fn prune_registry() -> Result<usize, VaultError> {
+pub fn prune_registry() -> Result<Vec<PathBuf>, VaultError> {
     prune::prune(&TomlRegistry)
 }

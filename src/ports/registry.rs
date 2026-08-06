@@ -2,7 +2,7 @@
 
 //! Global vault registry port.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::VaultError;
 use crate::registry::VaultRegistry;
@@ -18,6 +18,6 @@ pub trait RegistryStore: Send + Sync {
     /// Register `root` when not already present.
     fn register(&self, root: &Path) -> Result<bool, VaultError>;
 
-    /// Remove vault entries whose roots no longer exist.
-    fn prune_stale(&self) -> Result<usize, VaultError>;
+    /// Remove vault entries whose roots no longer exist, returning the removed roots.
+    fn prune_stale(&self) -> Result<Vec<PathBuf>, VaultError>;
 }

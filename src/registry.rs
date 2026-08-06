@@ -117,14 +117,17 @@ impl VaultRegistry {
 
     /// Remove vault entries whose roots no longer exist on disk.
     ///
+    /// Returns the roots that were removed.
+    ///
     /// # Errors
     ///
     /// Returns [`VaultError`] when the registry cannot be saved.
-    pub fn prune_stale(&mut self) -> Result<usize, VaultError> {
-        let before = self.vault.len();
-        self.vault.retain(|entry| entry.root.is_dir());
-        let removed = before.saturating_sub(self.vault.len());
-        if removed > 0 {
+    pub fn prune_stale(&mut self) -> Result<Vec<PathBuf>, VaultError> {
+        let (kept, removed): (Vec<_>, Vec<_>) =
+            self.vault.drain(..).partition(|entry| entry.root.is_dir());
+        self.vault = kept;
+        let removed: Vec<PathBuf> = removed.into_iter().map(|entry| entry.root).collect();
+        if !removed.is_empty() {
             self.save()?;
         }
         Ok(removed)
@@ -209,14 +212,28 @@ mod tests {
             let missing = dir.path().join("gone");
             let mut registry = VaultRegistry::default();
             registry.vault.push(VaultEntry {
-                root: missing,
+                root: missing.clone(),
                 registered_at: Utc::now(),
                 enabled: true,
             });
             registry.save().expect("save");
             let removed = registry.prune_stale().expect("prune");
-            assert_eq!(removed, 1);
+            assert_eq!(removed, vec![missing]);
             assert!(registry.vault.is_empty());
+        });
+    }
+
+    #[test]
+    fn prune_stale_keeps_present_roots() {
+        let dir = TempDir::new().expect("tempdir");
+        with_state(&dir, || {
+            let mut registry = VaultRegistry::default();
+            registry
+                .register(dir.path())
+                .expect("register should succeed");
+            let removed = registry.prune_stale().expect("prune");
+            assert!(removed.is_empty());
+            assert_eq!(registry.vault.len(), 1);
         });
     }
 
