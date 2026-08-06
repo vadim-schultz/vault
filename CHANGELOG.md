@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+* `vault prune` — removes registry entries whose vault root no longer exists on disk and reports
+  which paths were removed (or that there's nothing to prune). Previously that cleanup only ran
+  reactively inside the background daemon on registry reload (see below, "`vault status` is
+  read-only"), leaving no way to clear stale entries when the daemon wasn't running.
+
 ### Changed
 
 * `vault log` now reads like `git log --stat` — a header line (vault's own commit message, no

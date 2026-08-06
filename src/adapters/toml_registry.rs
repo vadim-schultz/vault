@@ -1,6 +1,6 @@
 //! TOML-backed [`RegistryStore`] adapter.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::VaultError;
 use crate::ports::RegistryStore;
@@ -23,7 +23,7 @@ impl RegistryStore for TomlRegistry {
         registry.register(root)
     }
 
-    fn prune_stale(&self) -> Result<usize, VaultError> {
+    fn prune_stale(&self) -> Result<Vec<PathBuf>, VaultError> {
         let mut registry = VaultRegistry::load()?;
         registry.prune_stale()
     }
