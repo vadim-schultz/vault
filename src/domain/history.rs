@@ -23,3 +23,26 @@ pub struct TrackedFile {
     /// ISO-8601 UTC timestamp of the latest recorded change.
     pub last_modified: String,
 }
+
+/// One file's before/after content within a resolved commit, for diff/diffstat rendering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileVersionDiff {
+    /// Path relative to the vault worktree.
+    pub path: RelPath,
+    /// Content before this change, or `None` when the path did not exist yet.
+    pub previous: Option<Vec<u8>>,
+    /// Content after this change, or `None` when the path was deleted.
+    pub current: Option<Vec<u8>>,
+}
+
+/// A resolved commit's header message plus per-file diff content, ready for rendering.
+///
+/// Shared by `log` (one per historical commit) and `show`'s report mode (one, for the
+/// resolved commit).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitReport {
+    /// Header line, from the shared commit-message builder.
+    pub message: String,
+    /// Files touched by the commit (or by the query's path/prefix scope), in path order.
+    pub files: Vec<FileVersionDiff>,
+}

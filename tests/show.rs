@@ -63,3 +63,60 @@ fn show_untracked_path_fails_clearly() {
         .failure()
         .stderr(predicates::str::contains("not tracked"));
 }
+
+#[test]
+fn show_with_no_path_prints_whole_vault_report() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("doc.md"), b"line1\n").expect("write");
+    common::init_in(dir.path());
+    common::backdate_last_snapshot(dir.path(), "2026-06-01T09:00:00+00:00");
+
+    common::vault_bin()
+        .current_dir(dir.path())
+        .args(["show", "--at", "2026-06-02"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("update doc.md @"))
+        .stdout(predicates::str::contains("+line1"));
+}
+
+#[test]
+fn show_with_directory_path_scopes_report_to_subtree() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("doc.md"), b"top\n").expect("write");
+    fs::create_dir_all(dir.path().join("sub")).expect("mkdir sub");
+    fs::write(dir.path().join("sub/child.md"), b"nested\n").expect("write");
+    common::init_in(dir.path());
+    common::backdate_last_snapshot(dir.path(), "2026-06-01T09:00:00+00:00");
+
+    let output = common::vault_bin()
+        .current_dir(dir.path())
+        .args(["show", "sub", "--at", "2026-06-02"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let text = String::from_utf8(output).expect("utf8");
+
+    assert!(text.contains("sub/child.md"));
+    assert!(!text.contains("+top"));
+}
+
+#[test]
+fn show_single_file_path_is_unchanged_content_dump() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("doc.md"), b"v1").expect("write");
+    common::init_in(dir.path());
+    common::backdate_last_snapshot(dir.path(), "2026-06-01T09:00:00+00:00");
+
+    common::vault_bin()
+        .current_dir(dir.path())
+        .args(["show", "doc.md", "--at", "2026-06-02"])
+        .assert()
+        .success()
+        .stdout("v1");
+}

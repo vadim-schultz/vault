@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Changed
+
+* `vault log` now reads like `git log --stat` — a header line (vault's own commit message, no
+  commit SHA), an indented diffstat line per changed file, and a totals line, with a blank line
+  between commits; unscoped `vault log` now reports which files changed in each snapshot (it
+  previously showed nothing but timestamps). `--verbose` swaps the diffstat block for full
+  unified-diff hunks per file, like `git log -p`.
+* `vault show`'s `PATH` argument is now optional and gains two new scope levels: omitted prints a
+  whole-vault report (`git show <rev>` shaped — header + full diff per file, always); a directory
+  path scopes that same report to the subtree. An exact file path keeps today's raw-bytes dump,
+  byte-for-byte unchanged.
+* `vault diff`'s binary-file message now matches git's literal wording
+  (`Binary files a/<path> and b/<path> differ`) instead of `Binary files differ.`.
+* Commit-message wording for a mixed-kind batch (e.g. one modify + one delete in the same
+  snapshot) is now `"change {N} files"` instead of overclaiming `"update {N} files"`.
+
 ### Fixed
 
 * Repo growth no longer unbounded — daemon `git_housekeeping` task repacks when `[gc]` loose-object, pack-file, or max-age thresholds are exceeded; `vault status` shows live counts and last-repack summary.

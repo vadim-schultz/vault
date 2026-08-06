@@ -73,7 +73,7 @@ fn restore_dry_run_leaves_working_tree_and_history_untouched() {
         .stdout
         .clone();
     assert_eq!(
-        String::from_utf8(log_output).expect("utf8").lines().count(),
+        header_count(&String::from_utf8(log_output).expect("utf8")),
         2 // baseline create + the one modify, no restore entry
     );
 }
@@ -102,9 +102,21 @@ fn restoring_the_current_version_is_a_no_op() {
         .stdout
         .clone();
     assert_eq!(
-        String::from_utf8(log_output).expect("utf8").lines().count(),
+        header_count(&String::from_utf8(log_output).expect("utf8")),
         1 // just the baseline create, no-op restore added nothing
     );
+}
+
+fn header_count(log_text: &str) -> usize {
+    log_text
+        .lines()
+        .filter(|line| {
+            line.starts_with("update")
+                || line.starts_with("delete")
+                || line.starts_with("restore")
+                || line.starts_with("change")
+        })
+        .count()
 }
 
 #[test]

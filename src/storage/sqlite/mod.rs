@@ -155,6 +155,64 @@ impl MetaDb {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// List every `(path, event_type)` pair touched by `commit_sha`, ordered by path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn changeset(&self, commit_sha: &str) -> Result<Vec<(String, String)>, VaultError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(queries::SELECT_CHANGESET_FOR_COMMIT)?;
+        let rows = stmt.query_map(params![commit_sha], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Find the commit that most recently touched `path` before `commit_sha`, if any.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn previous_commit_for(
+        &self,
+        path: &str,
+        commit_sha: &str,
+    ) -> Result<Option<String>, VaultError> {
+        let conn = self.conn()?;
+        let result = conn.query_row(
+            queries::SELECT_PREVIOUS_COMMIT_FOR_PATH,
+            params![path, commit_sha],
+            |row| row.get::<_, String>(0),
+        );
+        optional_row(result)
+    }
+
+    /// The recorded `created_at` for `commit_sha`, if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn created_at_for(&self, commit_sha: &str) -> Result<Option<String>, VaultError> {
+        let conn = self.conn()?;
+        let result = conn.query_row(
+            queries::SELECT_CREATED_AT_FOR_COMMIT,
+            params![commit_sha],
+            |row| row.get::<_, String>(0),
+        );
+        optional_row(result)
+    }
+
+    /// List every distinct path ever recorded, regardless of delete state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VaultError`] when the query fails.
+    pub fn all_paths(&self) -> Result<Vec<String>, VaultError> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(queries::SELECT_ALL_PATHS)?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// List tracked files whose latest event is not a delete.
     ///
     /// # Errors
