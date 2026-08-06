@@ -25,12 +25,27 @@ fn log_lists_all_snapshots_newest_first() {
         .stdout
         .clone();
     let text = String::from_utf8(output).expect("utf8");
-    let lines: Vec<&str> = text.lines().collect();
+    let headers: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("update") || line.starts_with("change"))
+        .collect();
 
-    assert_eq!(lines.len(), 3);
-    assert!(lines[0].contains("2026-06-03T09:00:00"));
-    assert!(lines[1].contains("2026-06-02T09:00:00"));
-    assert!(lines[2].contains("2026-06-01T09:00:00"));
+    assert_eq!(headers.len(), 3);
+    assert!(headers[0].contains("2026-06-03T09:00:00"));
+    assert!(headers[1].contains("2026-06-02T09:00:00"));
+    assert!(headers[2].contains("2026-06-01T09:00:00"));
+    assert!(text.lines().next().unwrap().starts_with("update doc.md @"));
+    for line in text.lines() {
+        assert!(
+            !is_bare_hex_sha(line),
+            "line looks like a bare commit hash: {line:?}"
+        );
+    }
+}
+
+fn is_bare_hex_sha(line: &str) -> bool {
+    let first = line.split_whitespace().next().unwrap_or("");
+    first.len() >= 7 && first.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 #[test]
@@ -53,8 +68,37 @@ fn log_scoped_to_path_excludes_other_files() {
         .clone();
     let text = String::from_utf8(output).expect("utf8");
 
-    assert!(text.contains("modify"));
-    assert_eq!(text.lines().count(), 2); // baseline create + modify, not other.md's create
+    let headers: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("update") || line.starts_with("change"))
+        .collect();
+    assert_eq!(headers.len(), 2); // baseline (scoped) + modify, not other.md's own history
+    assert!(!text.contains("other.md"));
+    assert!(text.contains(" doc.md | 2 +-\n")); // v1 -> v2 modify
+    assert!(text.contains(" doc.md | 1 +\n")); // baseline create, scoped to doc.md only
+}
+
+#[test]
+fn log_verbose_shows_full_diff_hunks_no_hash() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("doc.md"), b"line1\n").expect("write");
+    common::init_in(dir.path());
+    common::backdate_last_snapshot(dir.path(), "2026-06-01T09:00:00+00:00");
+    common::snapshot_at(
+        dir.path(),
+        "doc.md",
+        b"line2\n",
+        "2026-06-02T09:00:00+00:00",
+    );
+
+    common::vault_bin()
+        .current_dir(dir.path())
+        .args(["--verbose", "log", "doc.md"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("-line1"))
+        .stdout(predicates::str::contains("+line2"));
 }
 
 #[test]

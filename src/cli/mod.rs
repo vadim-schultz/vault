@@ -2,6 +2,7 @@
 
 mod commands;
 mod context;
+mod render;
 mod support;
 
 use anyhow::Result;

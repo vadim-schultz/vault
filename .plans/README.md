@@ -1,7 +1,7 @@
 # Vault implementation plans
 
-Three streams: the MVP bootstrap (landed), ongoing benchmark / optimisation work, and release
-build tuning.
+Four streams: the MVP bootstrap (landed), ongoing benchmark / optimisation work, release
+build tuning, and CLI UX.
 
 ## MVP bootstrap (complete)
 
@@ -34,3 +34,12 @@ Binary size and compilation profile — what ships, not what runs:
 |----------|-------------|
 | [release/README.md](release/README.md) | Stream overview |
 | [release/binary_size.plan.md](release/binary_size.plan.md) | Measured profile-tuning + dependency-feature-trim proposals (draft) |
+
+## CLI UX (active)
+
+Humanizing the read commands — hiding commit SHAs, raw byte dumps, and other internal plumbing:
+
+| Document | Description |
+|----------|-------------|
+| [cli/README.md](cli/README.md) | Stream overview |
+| [cli/humanize_show_log.plan.md](cli/humanize_show_log.plan.md) | `vault show` scope levels + humanized `vault log` output (landed) |

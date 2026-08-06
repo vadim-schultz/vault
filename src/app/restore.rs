@@ -31,7 +31,7 @@ pub fn run(
     at: &str,
     dry_run: bool,
 ) -> Result<RestoreOutcome, VaultError> {
-    let content = crate::app::show::run(object_store, meta_index, path, at)?;
+    let content = crate::app::show::read_file_at(object_store, meta_index, path, at)?;
     if dry_run {
         return Ok(RestoreOutcome {
             bytes_written: 0,

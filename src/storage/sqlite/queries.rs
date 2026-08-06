@@ -102,6 +102,33 @@ WHERE f.path = ?1
 ORDER BY s.created_at DESC, s.id DESC
 ";
 
+/// Every path touched by a commit, with its event type, ordered by path.
+pub const SELECT_CHANGESET_FOR_COMMIT: &str = "
+SELECT f.path, f.event_type
+FROM file_events f
+JOIN snapshots s ON f.snapshot_id = s.id
+WHERE s.commit_sha = ?1
+ORDER BY f.path
+";
+
+/// The commit that most recently touched `path` before the snapshot for `commit_sha`.
+pub const SELECT_PREVIOUS_COMMIT_FOR_PATH: &str = "
+SELECT s2.commit_sha
+FROM file_events f
+JOIN snapshots s2 ON f.snapshot_id = s2.id
+WHERE f.path = ?1
+  AND f.snapshot_id < (SELECT id FROM snapshots WHERE commit_sha = ?2)
+ORDER BY f.snapshot_id DESC
+LIMIT 1
+";
+
+/// Every distinct path ever recorded, regardless of delete state, ordered by path.
+pub const SELECT_ALL_PATHS: &str = "SELECT DISTINCT path FROM file_events ORDER BY path";
+
+/// The recorded `created_at` for a specific commit.
+pub const SELECT_CREATED_AT_FOR_COMMIT: &str =
+    "SELECT created_at FROM snapshots WHERE commit_sha = ?1";
+
 /// Latest non-delete event per path, ordered by path.
 pub const SELECT_TRACKED_FILES: &str = "
 SELECT f.path, s.created_at

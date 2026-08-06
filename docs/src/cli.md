@@ -7,7 +7,7 @@ Command-line interface for the `vault` binary.
 | Flag | Description |
 |------|-------------|
 | `--version` / `-V` | Print version (`vault 0.1.0`) |
-| `-v` / `--verbose` | Verbose output (reserved for later chapters) |
+| `-v` / `--verbose` | For `vault log`: show full diff hunks per file instead of a diffstat (`git log -p` vs. `git log --stat`) |
 | `--vault-path PATH` | Path to the `.vault/` directory (default: `./.vault` under the current directory) |
 
 ## Subcommands
@@ -17,7 +17,7 @@ Command-line interface for the `vault` binary.
 | `init` | Implemented | 3 |
 | `status` | Implemented | 4 |
 | `ignore PATTERN` | Implemented | 4 |
-| `show PATH --at DATE` | Implemented | 5 |
+| `show [PATH] --at DATE` | Implemented | 5 |
 | `restore PATH --at DATE [--dry-run]` | Implemented | 5 |
 | `log [PATH]` | Implemented | 5 |
 | `diff PATH [--at DATE] [--to DATE]` | Implemented | 5 |
@@ -60,16 +60,29 @@ vault ignore '*.pdf'
 
 ### `vault show`
 
-View a file as it was at a given timestamp.
+`PATH` is optional and selects one of three scope levels, resolved against every path the vault
+has ever tracked (so a since-deleted file still resolves as a file, not a directory prefix):
+
+| `PATH` | Output |
+|--------|--------|
+| An exact file path (`README.md`) | That file's raw bytes at `--at`, unchanged — the only form worth piping (`vault show README.md --at ... > old.md`) |
+| A directory prefix (`docs/`) | A report for that subtree: header line + full unified diff per file touched by the resolved commit, like `git show <rev> -- docs/` |
+| Omitted | The same report for the whole vault, like plain `git show <rev>` |
+
+The report forms always print full diffs — there's no `--verbose` gate, since `show` is already
+pinned to one resolved commit (unlike `log`, which walks potentially many and stays terse by
+default; see below).
 
 ```bash
 vault show README.md --at 2026-06-01
 vault show design.md --at "2026-06-01 23:58"
+vault show docs --at 2026-06-01       # directory report
+vault show --at 2026-06-01            # whole-vault report
 ```
 
 | Argument / flag | Description |
 |-----------------|-------------|
-| `PATH` | File path relative to the vault root |
+| `PATH` | File or directory path relative to the vault root; omit for the whole vault |
 | `--at DATE` | Timestamp (see [Date formats](#date-formats)) |
 
 ### `vault restore`
@@ -92,12 +105,39 @@ vault restore design.md --at "2026-06-01 23:58" --dry-run
 
 ### `vault log`
 
-Browse version history for one file or the whole vault.
+Browse version history for one file or the whole vault, `git log --stat` shaped: a header line
+(vault's own commit message — no commit SHA), then an indented diffstat line per file changed,
+then a totals line, with a blank line between commits.
 
 ```bash
 vault log
 vault log docs/architecture.md
 ```
+
+```
+update notes.md @ 2026-08-05T12:58:27.962477+00:00
+ notes.md | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+restore notes.md @ 2026-08-05T12:58:15.669883+00:00
+ notes.md | 1 +
+ 1 file changed, 1 insertion(+)
+```
+
+`--verbose` swaps the diffstat lines for full unified-diff hunks per file, like `git log -p`:
+
+```bash
+vault --verbose log notes.md
+```
+
+`vault log`'s scope filters which commits are listed and which files' diffstat lines are shown,
+but each commit's header always reflects everything that commit touched (matching real
+`git log --stat -- PATH`) — a commit that changed two files still shows its own two-file message
+even when `log` is scoped to just one of them.
+
+Power users can inspect the vault's real git history directly — `.vault/` wraps an ordinary git
+repository (`VaultLayout::git_dir_path`, `.vault/.git`) — with `git --git-dir=.vault/.git log --stat`,
+which (per the above) now looks nearly identical to `vault log`'s own output, modulo the hash line.
 
 ### `vault diff`
 

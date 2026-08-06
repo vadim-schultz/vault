@@ -196,15 +196,16 @@ pause
 
 section "3. Edit notes.md — the watcher auto-commits it"
 echo "Hello again, Vault!" >notes.md
-wait_for "modify snapshot" bash -c "[[ \$('$VAULT_BIN' log notes.md | wc -l) -ge 2 ]]"
+wait_for "modify snapshot" bash -c "[[ \$('$VAULT_BIN' log notes.md | grep -cE '^(update|delete|restore|change) ') -ge 2 ]]"
 inspect
 
 section "4. Create and then delete draft.md"
 echo "scratch" >draft.md
-wait_for "draft.md snapshot" bash -c "'$VAULT_BIN' log draft.md | grep -q modify"
-echo "note: the watcher path always classifies a present file as 'modify', never"
-echo "'create' (see PathKind::classify in src/domain/change.rs) -- 'create' only"
-echo "ever comes from vault init's baseline walk, as notes.md showed in step 1."
+wait_for "draft.md snapshot" bash -c "'$VAULT_BIN' log draft.md | grep -q update"
+echo "note: file_events.event_type still stores raw create/modify/delete/restore"
+echo "values (see inspect_sqlite's file_events dump below, unchanged) -- it's only"
+echo "the humanized 'vault log' header that groups create+modify under 'update',"
+echo "matching git's own convention of not distinguishing them in --stat output."
 inspect_git
 inspect_sqlite
 pause
@@ -223,9 +224,9 @@ vlt log
 vlt log notes.md
 pause
 
-AT1="$("$VAULT_BIN" log notes.md | tail -n1 | awk '{print $2}')"
-AT1_SHA="$("$VAULT_BIN" log notes.md | tail -n1 | awk '{print $1}')"
-AT2="$("$VAULT_BIN" log notes.md | head -n1 | awk '{print $2}')"
+AT1="$("$VAULT_BIN" log notes.md | grep -E '^(update|delete|restore|change) ' | tail -n1 | awk '{print $NF}')"
+AT1_SHA="$(git --git-dir="$VAULT_DIR/.git" log --format='%H %s' --all | grep -F "$AT1" | awk '{print $1}')"
+AT2="$("$VAULT_BIN" log notes.md | grep -E '^(update|delete|restore|change) ' | head -n1 | awk '{print $NF}')"
 echo "captured AT1=$AT1 (baseline v1, commit $AT1_SHA), AT2=$AT2 (v2 modify)"
 
 section "7. vault show — retrieve v1's exact bytes"
@@ -246,7 +247,7 @@ pause
 section "10. vault diff — last snapshot vs. an uncommitted edit"
 echo "Hello a third time, Vault!" >notes.md
 vlt diff notes.md
-wait_for "third snapshot" bash -c "[[ \$('$VAULT_BIN' log notes.md | wc -l) -ge 3 ]]"
+wait_for "third snapshot" bash -c "[[ \$('$VAULT_BIN' log notes.md | grep -cE '^(update|delete|restore|change) ') -ge 3 ]]"
 echo "the watcher just auto-committed that edit too:"
 inspect
 
@@ -327,6 +328,33 @@ inspect_git
 echo ""
 echo "vault status enumerates it instead of staying silent about the skip:"
 vlt status
+pause
+
+section "16. Humanized vault log -- git --stat shape, --verbose for full diffs"
+vlt log notes.md
+echo ""
+echo "cross-check shape against real git log --stat (hash present there, absent above):"
+git --git-dir="$VAULT_DIR/.git" log --stat notes.md
+pause
+echo "--verbose swaps the diffstat block for full unified-diff hunks, like git log -p:"
+"$VAULT_BIN" --verbose log notes.md
+pause
+
+section "17. Humanized vault show -- whole-vault and directory report modes"
+echo "no PATH: report for the resolved commit, full diff always (no --verbose needed):"
+vlt show --at "$AT2"
+echo ""
+echo "cross-check against real git show:"
+AT2_SHA="$(git --git-dir="$VAULT_DIR/.git" log --format='%H %s' --all | grep -F "$AT2" | awk '{print $1}')"
+git --git-dir="$VAULT_DIR/.git" show "$AT2_SHA"
+pause
+echo "seed a subdirectory so directory-scoped show has something to filter to:"
+mkdir -p sub
+echo "sub file" >sub/child.md
+wait_for "sub/child.md snapshot" bash -c "'$VAULT_BIN' log sub/child.md | grep -q update"
+AT3="$("$VAULT_BIN" log | grep -E '^(update|delete|restore|change) ' | head -n1 | awk '{print $NF}')"
+echo "a directory path scopes the same report to that subtree only:"
+vlt show sub --at "$AT3"
 pause
 
 section "Final recap"

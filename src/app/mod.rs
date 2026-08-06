@@ -2,6 +2,7 @@
 
 pub mod add_ignore;
 pub mod diff;
+pub mod file_diff;
 pub mod init;
 pub mod list;
 pub mod log;
