@@ -20,6 +20,11 @@
 
 ### Fixed
 
+* Bare-date `--at YYYY-MM-DD` (`show`/`restore`/`diff`) now resolves to the end of that day in the
+  host's local timezone instead of UTC start-of-day — previously a bare date never reflected
+  anything that happened *on* that date (only the day before), and for a vault's first day could
+  fail outright with `no snapshot at or before ...` if the first snapshot landed after that day's
+  UTC midnight. `YYYY-MM-DD HH:MM` and RFC3339 forms are unaffected.
 * Repo growth no longer unbounded — daemon `git_housekeeping` task repacks when `[gc]` loose-object, pack-file, or max-age thresholds are exceeded; `vault status` shows live counts and last-repack summary.
 * Files over `max_file_bytes` no longer skipped silently — `vault status` enumerates currently oversized files under an `oversized (N not tracked)` block; `vault list`/snapshots unaffected (visibility only).
 * `resolve_at` (`show`/`diff`/`restore`) and `list_tracked_files` (`vault list`) no longer degrade linearly with total snapshot count — added `idx_snapshots_created_at` and rewrote `SELECT_TRACKED_FILES` to aggregate by path first; legacy `meta.db` files migrate on open.

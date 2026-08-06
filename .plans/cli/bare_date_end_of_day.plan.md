@@ -12,7 +12,7 @@ overview: "`--at YYYY-MM-DD` currently resolves to UTC midnight (start of that d
 todos:
   - id: branch
     content: Sync main, create feat/bare-date-end-of-day branch
-    status: pending
+    status: completed
   - id: tdd-end-of-day
     content: "TDD: rewrite AtDate::from_calendar_date (src/at_date.rs:52-59) to resolve YYYY-MM-DD
       to 23:59:59.999999999 in the host's local timezone, converted to UTC, instead of UTC
@@ -21,7 +21,7 @@ todos:
       vanishingly unlikely at 23:59:59 but not impossible in every timezone), fall back to
       .latest() rather than erroring, since day-granularity queries don't need exact-instant DST
       correctness the way an explicit HH:MM does"
-    status: pending
+    status: completed
   - id: tdd-unit-tests
     content: "Update src/at_date.rs's own tests: from_calendar_date_is_utc_midnight ->
       from_calendar_date_is_end_of_local_day, asserting against a value computed via
@@ -29,7 +29,7 @@ todos:
       from_local_date_time_converts_host_timezone_to_utc already uses) rather than a hardcoded
       UTC literal. parse_accepts_all_three_formats and from_str_delegates_to_parse need no
       behavior change, just re-verification"
-    status: pending
+    status: completed
   - id: tdd-integration-tests
     content: "tests/show.rs:10-33 (show_returns_content_at_or_before_date) is the one integration
       test that actually exercises the day-boundary: --at 2026-06-02 currently asserts it resolves
@@ -42,29 +42,29 @@ todos:
       whole-vault report, directory scope, single-file dump) still pass unmodified — each only has
       a single snapshot before the queried date, so the boundary shift doesn't change their
       resolved commit"
-    status: pending
+    status: completed
   - id: tdd-restore-diff-regression
     content: "tests/restore.rs:132 and tests/diff.rs use bare dates only for the
       before-any-snapshot-exists case (2020-01-01, 2026-06-02 as the 'no --at' usage-error
       sentinel) — confirm both still pass unchanged (end-of-day 2020-01-01 is still long before
       any 2026 snapshot) and add one new restore.rs case mirroring show.rs's same-day-resolves
       behavior if restore doesn't already exercise it elsewhere"
-    status: pending
+    status: completed
   - id: docs
     content: "Update docs/src/cli.md's Date formats table (~line 178-182): 'YYYY-MM-DD | Date;
       start of day UTC' -> 'YYYY-MM-DD | Date; end of day, local timezone'. Add a short line
       clarifying that a bare date shows the latest state as of that day (inclusive), which is why
       it now differs from the exact-instant RFC3339 form vault log prints (that one is still exact,
       unaffected)"
-    status: pending
+    status: completed
   - id: changelog
     content: "CHANGELOG.md Unreleased/Changed entry describing the semantics fix, calling out that
       it's a behavior change for anyone already relying on bare-date --at (unlikely given the old
       behavior was effectively unusable for 'today', but worth flagging since it is observable)"
-    status: pending
+    status: completed
   - id: ci
     content: "./scripts/ci.sh lint green"
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -160,7 +160,7 @@ restore, diff}.rs`), so this is a single-point fix — no per-command changes ne
 
 ## Exit criteria
 
-- [ ] `--at <today>` succeeds and reflects same-day edits for a vault initialized and edited today
-- [ ] `docs/src/cli.md`'s Date formats table matches the new behavior
-- [ ] `CHANGELOG.md` records the semantics change
-- [ ] `./scripts/ci.sh lint` green
+- [x] `--at <today>` succeeds and reflects same-day edits for a vault initialized and edited today
+- [x] `docs/src/cli.md`'s Date formats table matches the new behavior
+- [x] `CHANGELOG.md` records the semantics change
+- [x] `./scripts/ci.sh lint` green

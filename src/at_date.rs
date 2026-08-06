@@ -1,10 +1,11 @@
 //! `AtDate` — a validated point in time for time-travel queries.
 //!
-//! Three accepted textual forms, each with its own constructor: `YYYY-MM-DD` (start of day,
-//! UTC), `YYYY-MM-DD HH:MM` (local time), and full RFC3339 (exact — what `vault log` prints, so
-//! its output round-trips back into `--at`/`--to`). Internally always stored as a UTC RFC3339
-//! string so plain string comparison against `MetaIndex::resolve_at`'s `created_at` column stays
-//! chronologically correct — every producer of that column must also normalize to UTC.
+//! Three accepted textual forms, each with its own constructor: `YYYY-MM-DD` (end of day, local
+//! timezone — inclusive of that day's activity), `YYYY-MM-DD HH:MM` (local time), and full
+//! RFC3339 (exact — what `vault log` prints, so its output round-trips back into `--at`/`--to`).
+//! Internally always stored as a UTC RFC3339 string so plain string comparison against
+//! `MetaIndex::resolve_at`'s `created_at` column stays chronologically correct — every producer
+//! of that column must also normalize to UTC.
 
 use std::str::FromStr;
 
@@ -40,7 +41,13 @@ impl AtDate {
             })
     }
 
-    /// Parse `YYYY-MM-DD` as UTC midnight.
+    /// Parse `YYYY-MM-DD` as the end of that day (23:59:59.999999999) in the host's local
+    /// timezone, converted to UTC.
+    ///
+    /// End of day (not start) so a bare date reads as inclusive of that day's activity — "show me
+    /// X as of this date" naturally means as of when the date finished, not when it began. Local
+    /// (not UTC) so it agrees with the `HH:MM` form's timezone basis and resolves correctly
+    /// regardless of the host's UTC offset.
     ///
     /// # Errors
     ///
@@ -48,14 +55,26 @@ impl AtDate {
     ///
     /// # Panics
     ///
-    /// Never: midnight is a valid time on every calendar date.
+    /// Never: 23:59:59.999999999 is a valid time on every calendar date.
     pub fn from_calendar_date(input: &str) -> Result<Self, VaultError> {
         let date =
             NaiveDate::parse_from_str(input, DATE_FMT).map_err(|_| VaultError::InvalidDate {
                 input: input.to_string(),
             })?;
-        let midnight = date.and_hms_opt(0, 0, 0).expect("midnight is always valid");
-        Ok(Self(Utc.from_utc_datetime(&midnight).to_rfc3339()))
+        let end_of_day = date
+            .and_hms_nano_opt(23, 59, 59, 999_999_999)
+            .expect("23:59:59.999999999 is always valid");
+        // `.latest()` rather than `.single()`/erroring on a DST-ambiguous instant: this is
+        // already an approximate day-granularity boundary, not an exact instant a user typed, so
+        // picking either valid interpretation is fine — unlike `from_local_date_time`, where the
+        // user named a specific wall-clock time and an ambiguous match should be reported.
+        let local = Local
+            .from_local_datetime(&end_of_day)
+            .latest()
+            .ok_or_else(|| VaultError::InvalidDate {
+                input: input.to_string(),
+            })?;
+        Ok(Self(local.with_timezone(&Utc).to_rfc3339()))
     }
 
     /// Parse `YYYY-MM-DD HH:MM` as local time, converted to UTC.
@@ -106,10 +125,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_calendar_date_is_utc_midnight() {
+    fn from_calendar_date_is_end_of_local_day() {
+        let naive = NaiveDate::parse_from_str("2026-06-01", DATE_FMT)
+            .unwrap()
+            .and_hms_nano_opt(23, 59, 59, 999_999_999)
+            .unwrap();
+        let expected = Local
+            .from_local_datetime(&naive)
+            .latest()
+            .unwrap()
+            .with_timezone(&Utc)
+            .to_rfc3339();
         assert_eq!(
             AtDate::from_calendar_date("2026-06-01").unwrap().as_str(),
-            "2026-06-01T00:00:00+00:00"
+            expected
         );
     }
 

@@ -120,6 +120,27 @@ fn header_count(log_text: &str) -> usize {
 }
 
 #[test]
+fn restore_resolves_bare_date_to_that_days_own_commit() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    fs::write(dir.path().join("doc.md"), b"v1").expect("write");
+    common::init_in(dir.path());
+    common::backdate_last_snapshot(dir.path(), "2026-06-01T09:00:00+00:00");
+    common::snapshot_at(dir.path(), "doc.md", b"v2", "2026-06-02T09:00:00+00:00");
+    common::snapshot_at(dir.path(), "doc.md", b"v3", "2026-06-03T09:00:00+00:00");
+
+    common::vault_bin()
+        .current_dir(dir.path())
+        .env("TZ", "UTC")
+        .args(["restore", "doc.md", "--at", "2026-06-02"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Restored doc.md"));
+
+    assert_eq!(fs::read(dir.path().join("doc.md")).expect("read"), b"v2");
+}
+
+#[test]
 fn restoring_a_time_with_no_snapshot_fails_and_writes_nothing() {
     let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
