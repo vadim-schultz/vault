@@ -6,3 +6,4 @@ git, not a thin wrapper that leaks commit SHAs and raw byte dumps.
 | Document | Role |
 |----------|------|
 | [humanize_show_log.plan.md](humanize_show_log.plan.md) | `vault show` scope levels (file/directory/whole-vault) + humanized `vault log` output (landed) |
+| [bare_date_end_of_day.plan.md](bare_date_end_of_day.plan.md) | Fix `--at YYYY-MM-DD` resolving to UTC start-of-day, which made same-day queries fail/silently return the wrong day (draft) |
