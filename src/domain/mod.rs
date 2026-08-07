@@ -14,4 +14,4 @@ pub use message::{snapshot_message, verb_for};
 pub use queue::{QueuedTask, TaskId, TaskKind};
 pub use rel_path::RelPath;
 pub use snapshot::{CommitSha, SnapshotRecord, SnapshotResult};
-pub use vault::{vault_state, VaultLayout, VaultState};
+pub use vault::{missing_markers, vault_state, VaultLayout, VaultState};

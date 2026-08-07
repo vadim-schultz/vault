@@ -22,16 +22,18 @@ fn init_creates_vault_layout() {
 }
 
 #[test]
-fn init_rejects_second_run() {
+fn init_second_run_is_idempotent() {
     let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
     common::vault_bin()
+        .env(vault::paths::NO_SERVICE_ENV, "1")
         .current_dir(dir.path())
         .arg("init")
         .assert()
-        .failure()
-        .stderr(predicates::str::contains("already initialized"));
+        .success()
+        .stdout(predicates::str::contains("already initialized"));
+    common::assert_vault_layout(dir.path());
 }
 
 #[test]
@@ -79,6 +81,25 @@ fn partial_vault_reports_stray_files() {
         .assert()
         .failure()
         .stderr(predicates::str::contains("README"));
+}
+
+#[test]
+fn partial_vault_heals_missing_readme_and_config() {
+    let _env = common::VaultEnv::new();
+    let dir = TempDir::new().expect("tempdir");
+    let vault_dir = dir.path().join(VAULT_DIR);
+    fs::create_dir_all(&vault_dir).expect("mkdir");
+    vault::storage::git::init(&vault_dir.join(GIT_DIR), dir.path()).expect("git init");
+    vault::storage::sqlite::init_meta_db(&vault_dir.join(META_DB)).expect("sqlite init");
+
+    common::vault_bin()
+        .env(vault::paths::NO_SERVICE_ENV, "1")
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("repaired"));
+    common::assert_vault_layout(dir.path());
 }
 
 #[test]

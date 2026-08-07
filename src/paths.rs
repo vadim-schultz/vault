@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::domain::{vault_state, VaultLayout, VaultState};
+use crate::domain::{missing_markers, vault_state, VaultLayout, VaultState};
 use crate::error::VaultError;
 
 /// Default `.vault/` directory name relative to the worktree.
@@ -153,24 +153,17 @@ pub fn daemon_log_path() -> Result<PathBuf, VaultError> {
     state_file(DAEMON_LOG)
 }
 
-/// Resolve worktree and `.vault/` paths for initialization.
+/// Resolve worktree and `.vault/` paths for initialization, along with the
+/// vault's current [`VaultState`] so callers can decide how to proceed
+/// (fresh init, idempotent no-op, or partial repair).
 ///
 /// # Errors
 ///
-/// Returns [`VaultError::InvalidVaultPath`] when `--vault-path` has no parent,
-/// or [`VaultError::AlreadyInitialized`] when init markers are present.
-pub fn resolve_init(vault_path: Option<PathBuf>) -> Result<VaultLayout, VaultError> {
+/// Returns [`VaultError::InvalidVaultPath`] when `--vault-path` has no parent.
+pub fn resolve_init(vault_path: Option<PathBuf>) -> Result<(VaultLayout, VaultState), VaultError> {
     let layout = resolve_layout(vault_path)?;
-    match vault_state(&layout.vault_dir) {
-        VaultState::Absent => Ok(layout),
-        VaultState::Ready => Err(VaultError::AlreadyInitialized {
-            path: layout.vault_dir,
-        }),
-        VaultState::Partial(found) => Err(VaultError::PartialVault {
-            path: layout.vault_dir,
-            found: found.join(", "),
-        }),
-    }
+    let state = vault_state(&layout.vault_dir);
+    Ok((layout, state))
 }
 
 /// Resolve paths for an existing vault.
@@ -187,6 +180,7 @@ pub fn resolve_vault(vault_path: Option<PathBuf>) -> Result<VaultLayout, VaultEr
         }),
         VaultState::Partial(found) => Err(VaultError::PartialVault {
             path: layout.vault_dir,
+            missing: missing_markers(&found).join(", "),
             found: found.join(", "),
         }),
     }
@@ -231,15 +225,16 @@ mod tests {
         std::env::set_current_dir(dir.path()).expect("chdir");
         let expected = canonical.join(VAULT_DIR);
 
-        let layout = resolve_init(None).expect("resolve");
+        let (layout, state) = resolve_init(None).expect("resolve");
 
         assert_eq!(layout.vault_dir, expected);
         assert_eq!(layout.worktree, canonical);
+        assert_eq!(state, VaultState::Absent);
         std::env::set_current_dir(restore).expect("restore cwd");
     }
 
     #[test]
-    fn resolve_init_rejects_existing_vault() {
+    fn resolve_init_reports_ready_for_existing_vault() {
         let dir = TempDir::new().expect("tempdir");
         let vault_dir = dir.path().join(VAULT_DIR);
         fs::create_dir_all(&vault_dir).expect("mkdir");
@@ -248,8 +243,8 @@ mod tests {
         fs::create_dir_all(vault_dir.join(GIT_DIR)).expect("git");
         fs::write(vault_dir.join(README_FILE), b"x").expect("readme");
 
-        let err = resolve_init(Some(vault_dir)).expect_err("should fail");
-        assert!(matches!(err, VaultError::AlreadyInitialized { .. }));
+        let (_, state) = resolve_init(Some(vault_dir)).expect("resolve");
+        assert_eq!(state, VaultState::Ready);
     }
 
     #[test]

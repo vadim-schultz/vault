@@ -11,6 +11,10 @@
 
 ### Changed
 
+* `vault init` on an already-initialized vault no longer errors — it verifies (and restarts, if
+  stopped) the daemon and reports status instead, matching `git init`'s own idempotency. A vault
+  missing only its `README`/`config.toml` self-heals; `.git` or `meta.db` being missing still
+  refuses (naming the missing marker) rather than risk silently orphaning or hiding history.
 * `vault log` now reads like `git log --stat` — a header line (vault's own commit message, no
   commit SHA), an indented diffstat line per changed file, and a totals line, with a blank line
   between commits; unscoped `vault log` now reports which files changed in each snapshot (it

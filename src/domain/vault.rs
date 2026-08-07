@@ -69,10 +69,12 @@ pub enum VaultState {
     Ready,
 }
 
+/// Fixed set of markers that make up a fully-initialized `.vault/` directory.
+const MARKERS: &[&str] = &[CONFIG_FILE, META_DB, GIT_DIR, README_FILE];
+
 /// Return the initialization state of `vault_dir`.
 #[must_use]
 pub fn vault_state(vault_dir: &Path) -> VaultState {
-    const MARKERS: &[&str] = &[CONFIG_FILE, META_DB, GIT_DIR, README_FILE];
     let present: Vec<&str> = MARKERS
         .iter()
         .filter(|name| vault_dir.join(name).exists())
@@ -83,6 +85,17 @@ pub fn vault_state(vault_dir: &Path) -> VaultState {
         n if n == MARKERS.len() => VaultState::Ready,
         _ => VaultState::Partial(present),
     }
+}
+
+/// Return the init markers absent from `present` (the complement within the
+/// fixed marker set used by [`vault_state`]).
+#[must_use]
+pub fn missing_markers(present: &[&'static str]) -> Vec<&'static str> {
+    MARKERS
+        .iter()
+        .filter(|marker| !present.contains(marker))
+        .copied()
+        .collect()
 }
 
 #[cfg(test)]

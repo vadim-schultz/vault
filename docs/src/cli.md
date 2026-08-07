@@ -36,7 +36,22 @@ vault init
 vault init --no-service   # skip daemon install/start (also VAULT_NO_SERVICE=1)
 ```
 
-Running `vault init` again in the same directory fails with an "already initialized" error.
+Running `vault init` again in the same directory is safe — like `git init`, it never touches
+existing history:
+
+```
+$ vault init
+Vault already initialized at /path/to/.vault
+Daemon already running (pid 4821)
+```
+
+If the daemon had stopped, the same command restarts it and reports that instead. If `.vault/` is
+missing only its `README` and/or `config.toml` (e.g. deleted by hand), `vault init` regenerates
+just those and reports what it restored; regenerating `config.toml` resets it to defaults, so
+re-apply any custom `watch_roots`/`ignore` entries afterward. If `.git/` or `meta.db` itself is
+missing, `vault init` still refuses and reports which marker is missing — recreating either of
+those from scratch could orphan or hide existing history, so it requires manual recovery rather
+than a guess.
 
 | Flag | Description |
 |------|-------------|
