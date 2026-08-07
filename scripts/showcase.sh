@@ -194,6 +194,29 @@ echo "after heartbeat tick (queue snapshot may now be empty if work finished):"
 inspect_queue_status
 pause
 
+section "2b. Re-running vault init is idempotent"
+echo "vault init on an already-initialized, healthy vault is now a safe no-op"
+echo "(like git init on an existing repo) -- it just confirms the daemon and"
+echo "registry are in the state a first run would have left them. The daemon"
+echo "started in step 2 is already running, so this only reports that back:"
+vlt init
+pause
+
+echo "damaging the second vault (nested-vault) to show repair vs. refusal:"
+(
+    cd nested-vault
+    echo "removing README and config.toml (safe to regenerate, no data risk):"
+    rm .vault/README .vault/config.toml
+    vlt init --no-service
+    ls .vault
+    echo ""
+    echo "removing .git too (data-bearing -- vault init now refuses rather than"
+    echo "risk silently orphaning or hiding history):"
+    rm -rf .vault/.git
+    vlt init --no-service || echo "(failed as expected)"
+)
+pause
+
 section "3. Edit notes.md — the watcher auto-commits it"
 echo "Hello again, Vault!" >notes.md
 wait_for "modify snapshot" bash -c "[[ \$('$VAULT_BIN' log notes.md | grep -cE '^(update|delete|restore|change) ') -ge 2 ]]"

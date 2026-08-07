@@ -36,7 +36,7 @@ fn two_inits_produce_two_entries() {
 }
 
 #[test]
-fn failed_reinit_does_not_duplicate() {
+fn second_init_does_not_duplicate_registry_entry() {
     let _env = common::VaultEnv::new();
     let dir = TempDir::new().expect("tempdir");
     common::init_in(dir.path());
@@ -45,7 +45,7 @@ fn failed_reinit_does_not_duplicate() {
         .current_dir(dir.path())
         .arg("init")
         .assert()
-        .failure();
+        .success();
 
     let registry = VaultRegistry::load().expect("load");
     assert_eq!(registry.vault.len(), 1);

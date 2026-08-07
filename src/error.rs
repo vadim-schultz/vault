@@ -5,20 +5,17 @@ use std::path::PathBuf;
 /// Errors returned by vault library operations.
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
-    /// A vault already exists at the target path.
-    #[error("vault already initialized at {path}")]
-    AlreadyInitialized {
-        /// Path to the existing `.vault/` directory.
-        path: PathBuf,
-    },
-
-    /// Partial vault artifacts exist.
-    #[error("incomplete vault at {path} (found: {found})")]
+    /// Partial vault artifacts exist, and at least one data-bearing marker
+    /// (`.git`/`meta.db`) is among the missing ones, so automatic repair was
+    /// refused.
+    #[error("incomplete vault at {path} (found: {found}; missing: {missing})")]
     PartialVault {
         /// Path to the partial `.vault/` directory.
         path: PathBuf,
         /// Human-readable list of present markers.
         found: String,
+        /// Human-readable list of missing markers.
+        missing: String,
     },
 
     /// `--vault-path` does not have a parent directory.
