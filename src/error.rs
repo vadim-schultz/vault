@@ -2,13 +2,18 @@
 
 use std::path::PathBuf;
 
+use crate::paths::META_DB;
+
 /// Errors returned by vault library operations.
 #[derive(Debug, thiserror::Error)]
 pub enum VaultError {
     /// Partial vault artifacts exist, and at least one data-bearing marker
     /// (`.git`/`meta.db`) is among the missing ones, so automatic repair was
     /// refused.
-    #[error("incomplete vault at {path} (found: {found}; missing: {missing})")]
+    #[error(
+        "incomplete vault at {path} (found: {found}; missing: {missing}){}",
+        reindex_hint(missing)
+    )]
     PartialVault {
         /// Path to the partial `.vault/` directory.
         path: PathBuf,
@@ -153,6 +158,36 @@ pub enum VaultError {
         /// Task identifier.
         id: u64,
     },
+
+    /// `vault reindex` found a commit with more than one parent while walking `.git`'s history.
+    /// Vault's own writes only ever produce single-parent commits, so this means `.vault/.git`
+    /// was mutated by something other than vault itself; refuse rather than silently picking a
+    /// parent and hiding history.
+    #[error("commit {commit_sha} has more than one parent — .vault/.git history is not linear, refusing to reindex")]
+    NonLinearHistory {
+        /// The offending commit's hex SHA.
+        commit_sha: String,
+    },
+
+    /// `vault reindex` refused to overwrite an existing, populated `meta.db` without `--force`.
+    #[error("meta.db at {path} already has {snapshot_count} snapshot(s) — pass --force to rebuild it from .git history")]
+    MetaDbNotEmpty {
+        /// Path to the existing `meta.db`.
+        path: PathBuf,
+        /// Number of snapshot rows already present.
+        snapshot_count: i64,
+    },
+}
+
+/// Extra hint appended to [`VaultError::PartialVault`]'s message when `missing` names only
+/// `meta.db` — that's the one data-bearing marker with a safe, automated fix (`vault reindex`,
+/// see `app::reindex`); `.git` missing (alone or alongside `meta.db`) still has none.
+fn reindex_hint(missing: &str) -> &'static str {
+    if missing == META_DB {
+        " — run `vault reindex` to rebuild it from .git history"
+    } else {
+        ""
+    }
 }
 
 impl VaultError {
@@ -175,6 +210,26 @@ impl VaultError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_vault_hints_reindex_when_only_meta_db_is_missing() {
+        let err = VaultError::PartialVault {
+            path: PathBuf::from("/vault/.vault"),
+            found: "config.toml, .git, README".to_string(),
+            missing: "meta.db".to_string(),
+        };
+        assert!(err.to_string().contains("run `vault reindex`"));
+    }
+
+    #[test]
+    fn partial_vault_has_no_reindex_hint_when_git_is_also_missing() {
+        let err = VaultError::PartialVault {
+            path: PathBuf::from("/vault/.vault"),
+            found: "config.toml, README".to_string(),
+            missing: ".git, meta.db".to_string(),
+        };
+        assert!(!err.to_string().contains("vault reindex"));
+    }
 
     #[test]
     fn invalid_glob_is_not_io_error() {

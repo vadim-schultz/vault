@@ -8,6 +8,12 @@
   which paths were removed (or that there's nothing to prune). Previously that cleanup only ran
   reactively inside the background daemon on registry reload (see below, "`vault status` is
   read-only"), leaving no way to clear stale entries when the daemon wasn't running.
+* `vault reindex [--force] [--dry-run]` — rebuilds `meta.db` by replaying `.git`'s commit history
+  (each commit's tree diffed against its parent, with the commit message supplying the original
+  timestamp and restore classification). Safe and unconditional when `meta.db` is missing or
+  empty; requires `--force` to overwrite one that already has snapshots. Closes the gap
+  `vault init`'s idempotency work deliberately left erroring — `.git` intact but `meta.db` missing
+  is now a one-command fix instead of a dead end.
 
 ### Changed
 

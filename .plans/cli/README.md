@@ -9,3 +9,4 @@ git, not a thin wrapper that leaks commit SHAs and raw byte dumps.
 | [bare_date_end_of_day.plan.md](bare_date_end_of_day.plan.md) | Fix `--at YYYY-MM-DD` resolving to UTC start-of-day, which made same-day queries fail/silently return the wrong day (landed) |
 | [vault_prune.plan.md](vault_prune.plan.md) | `vault prune` — manual escape hatch for `[missing]` registry entries the daemon's reactive prune doesn't reach |
 | [vault_init_idempotent.plan.md](vault_init_idempotent.plan.md) | `vault init` on an existing vault — restart a stopped daemon and repair safely-regenerable markers instead of hard-erroring (draft) |
+| [vault_reindex.plan.md](vault_reindex.plan.md) | `vault reindex` — rebuild `meta.db` from `.git` commit history when it's missing, the follow-up `vault_init_idempotent.plan.md` deferred (draft) |

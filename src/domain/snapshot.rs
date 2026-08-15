@@ -31,3 +31,21 @@ pub struct SnapshotRecord {
     /// File changes in this snapshot.
     pub changes: Vec<super::change::FileChange>,
 }
+
+/// One commit as observed by walking `.git`'s history directly, for `vault reindex`.
+///
+/// Unlike [`SnapshotRecord`], `created_at` isn't known yet — it (and, for a restore, the exact
+/// `Restore` classification) still needs to be recovered from `message`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryCommit {
+    /// Commit object id.
+    pub sha: CommitSha,
+    /// Raw git commit message, as written by `app::snapshot::commit`.
+    pub message: String,
+    /// File changes, derived from diffing this commit's tree against its parent's.
+    pub changes: Vec<super::change::FileChange>,
+    /// This commit's own committer timestamp (ISO-8601 UTC), as a fallback `created_at` for
+    /// messages that don't match vault's own `"... @ <created_at>"` format. Lower fidelity than
+    /// parsing the message — see `app::reindex`'s design notes.
+    pub committer_time: String,
+}
