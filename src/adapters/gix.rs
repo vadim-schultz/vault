@@ -2,7 +2,7 @@
 
 use std::sync::Mutex;
 
-use crate::domain::{CommitSha, FileChange, RelPath, VaultLayout};
+use crate::domain::{CommitSha, FileChange, HistoryCommit, RelPath, VaultLayout};
 use crate::error::VaultError;
 use crate::ports::ObjectStore;
 use crate::storage::git::{self, GitStore};
@@ -67,5 +67,9 @@ impl ObjectStore for GixObjectStore {
 
     fn read_blob(&self, commit: &CommitSha, path: &RelPath) -> Result<Option<Vec<u8>>, VaultError> {
         self.with_store(|store| store.read_blob_at(commit.as_str(), path))
+    }
+
+    fn history(&self) -> Result<Vec<HistoryCommit>, VaultError> {
+        self.with_store(GitStore::walk_history)
     }
 }

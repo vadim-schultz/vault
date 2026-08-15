@@ -43,6 +43,8 @@ pub enum Command {
     Status,
     /// Remove registered vaults whose root directory no longer exists.
     Prune,
+    /// Rebuild `meta.db` by replaying `.git`'s commit history.
+    Reindex(commands::reindex::ReindexArgs),
     /// List tracked files and their latest version timestamp.
     List,
     /// Add an ignore glob pattern.
@@ -79,6 +81,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
         Command::Diff(args) => commands::diff::run(&global, args).await,
         Command::Status => commands::status::run().await,
         Command::Prune => commands::prune::run().await,
+        Command::Reindex(args) => commands::reindex::run(&global, args).await,
         Command::List => commands::list::run(&global).await,
         Command::Ignore(args) => commands::ignore::run(&global, args).await,
         Command::Daemon(args) => commands::daemon::run(args).await,

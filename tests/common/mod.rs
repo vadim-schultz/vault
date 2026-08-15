@@ -120,6 +120,15 @@ pub fn write_and_commit(worktree: &Path, rel: &str, content: &[u8]) {
         .expect("commit");
 }
 
+/// Delete `rel` (relative to `worktree`) and commit the deletion via the real snapshot
+/// pipeline (bypassing the watcher's debounce), mirroring [`write_and_commit`] for removals.
+pub fn delete_and_commit(worktree: &Path, rel: &str) {
+    std::fs::remove_file(worktree.join(rel)).expect("remove");
+    let vault = vault::watcher::router::WatchedVault::load(worktree).expect("load vault");
+    vault::watcher::worker::commit_batch(&vault, &[vault::domain::RelPath::parse(rel)])
+        .expect("commit");
+}
+
 /// Overwrite the most recently inserted snapshot's `created_at`, for deterministic
 /// `--at` fixtures. Must be called immediately after `write_and_commit`.
 pub fn backdate_last_snapshot(worktree: &Path, created_at: &str) {

@@ -10,8 +10,8 @@ pub mod vault;
 
 pub use change::{FileChange, FileEventKind, PathKind};
 pub use history::{CommitReport, FileVersionDiff, SnapshotEntry, TrackedFile};
-pub use message::{snapshot_message, verb_for};
+pub use message::{parse_created_at, parse_single_verb, snapshot_message, verb_for};
 pub use queue::{QueuedTask, TaskId, TaskKind};
 pub use rel_path::RelPath;
-pub use snapshot::{CommitSha, SnapshotRecord, SnapshotResult};
+pub use snapshot::{CommitSha, HistoryCommit, SnapshotRecord, SnapshotResult};
 pub use vault::{missing_markers, vault_state, VaultLayout, VaultState};

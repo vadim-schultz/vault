@@ -15,6 +15,7 @@ Command-line interface for the `vault` binary.
 | Command | Status | Chapter |
 |---------|--------|---------|
 | `init` | Implemented | 3 |
+| `reindex [--force] [--dry-run]` | Implemented | - |
 | `status` | Implemented | 4 |
 | `prune` | Implemented | - |
 | `ignore PATTERN` | Implemented | 4 |
@@ -48,15 +49,50 @@ Daemon already running (pid 4821)
 If the daemon had stopped, the same command restarts it and reports that instead. If `.vault/` is
 missing only its `README` and/or `config.toml` (e.g. deleted by hand), `vault init` regenerates
 just those and reports what it restored; regenerating `config.toml` resets it to defaults, so
-re-apply any custom `watch_roots`/`ignore` entries afterward. If `.git/` or `meta.db` itself is
-missing, `vault init` still refuses and reports which marker is missing — recreating either of
-those from scratch could orphan or hide existing history, so it requires manual recovery rather
-than a guess.
+re-apply any custom `watch_roots`/`ignore` entries afterward. If `.git/` itself is missing, `vault
+init` still refuses and reports which marker is missing — recreating it from scratch would orphan
+`meta.db`'s references to history that would no longer exist, so it requires manual recovery
+rather than a guess. If only `meta.db` is missing, `.git/` still has the real history — see `vault
+reindex` below.
 
 | Flag | Description |
 |------|-------------|
 | `--vault-path PATH` | Path to the `.vault/` directory (default: `./.vault` under the current directory) |
 | `--no-service` | Do not install or start the background watcher |
+
+### `vault reindex`
+
+Rebuild `meta.db` by replaying `.git/`'s commit history — each commit's tree is diffed against
+its parent's to recover which files were created, modified, or deleted, and the commit's own
+message (`vault: update PATH @ TIMESTAMP`, etc.) supplies the original timestamp and, for a
+restored file, the exact `Restore` classification.
+
+`meta.db` is a pure index over `.git/` — nothing else reads it to decide what to write to git, so
+this is real reconstruction, not data recovery under uncertainty. The same relationship exists
+between a git repository and its pack `.idx` file or `commit-graph` cache: derived, and safe to
+regenerate from the object database at any time.
+
+```bash
+vault reindex              # rebuild when meta.db is missing or empty — no flag needed
+vault reindex --force      # rebuild even though meta.db already has snapshots
+vault reindex --dry-run    # preview commit count and time span without writing
+```
+
+```
+$ vault reindex
+Reindexed meta.db at /path/to/.vault (42 commits, 2026-01-03T09:00:00+00:00 to 2026-08-06T05:29:55+00:00)
+```
+
+Refuses unconditionally when `.git/` itself is missing — there is nothing to replay from. Refuses
+when `meta.db` already has snapshots unless `--force` is passed: rebuilding from scratch when
+there's nothing to lose needs no confirmation (the same way git regenerates a missing pack index
+without asking), but overwriting an existing, populated index is a "discard what's there" action,
+so it needs the explicit opt-in `--force` gives, the same as `git branch -f`/`git checkout -f`.
+
+| Flag | Description |
+|------|-------------|
+| `--force` | Rebuild even if `meta.db` already has snapshots |
+| `--dry-run` | Report what would be reindexed without writing |
 
 ### `vault status`
 
